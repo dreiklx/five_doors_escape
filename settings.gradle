@@ -10,4 +10,4 @@ pluginManagement {
 include 'core'
 include 'lwjgl3'
 
-rootProject.name = 'five-doors-escape'
+rootProject.name = 'five_doors_escape'

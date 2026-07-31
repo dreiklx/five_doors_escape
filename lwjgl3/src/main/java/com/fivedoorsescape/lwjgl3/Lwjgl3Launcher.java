@@ -7,7 +7,7 @@ import com.fivedoorsescape.FiveDoorsEscapeGame;
 public class Lwjgl3Launcher {
     public static void main(String[] args) {
         Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setTitle("five-doors-escape (validation)");
+        config.setTitle("five_doors_escape (validation)");
         config.setWindowedMode(960, 720);
         config.useVsync(true);
         config.setForegroundFPS(60);
