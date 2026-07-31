@@ -1,0 +1,6 @@
+sourceSets.main.java.srcDirs = ["src/main/java"]
+
+dependencies {
+    api "com.badlogicgames.gdx:gdx:$gdxVersion"
+    api "com.github.mgsx-dev.gdx-gltf:gltf:$gltfVersion"
+}

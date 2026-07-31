@@ -1,0 +1,44 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+        maven { url 'https://s01.oss.sonatype.org' }
+    }
+    dependencies {
+    }
+}
+
+allprojects {
+    apply plugin: 'eclipse'
+
+    version = '1.0.0'
+    ext {
+        appName = 'five-doors-escape'
+        gdxVersion = '1.14.2'
+        gltfVersion = '2.3.0'
+    }
+}
+
+configure(subprojects) {
+    apply plugin: 'java-library'
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.incremental = true
+    }
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+        maven { url 'https://s01.oss.sonatype.org' }
+        maven { url 'https://jitpack.io' }
+    }
+}

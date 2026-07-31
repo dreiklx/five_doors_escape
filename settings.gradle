@@ -1,0 +1,13 @@
+pluginManagement {
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        google()
+        maven { url 'https://s01.oss.sonatype.org' }
+    }
+}
+
+include 'core'
+include 'lwjgl3'
+
+rootProject.name = 'five-doors-escape'
