@@ -16,4 +16,8 @@ public class MapDefinition {
     public float playerStartY = 1.6f;
     public float playerStartZ = 0f;
     public float playerStartYawDegrees = 0f;
+
+    /** Posicion inicial de Freddy -- fija, no derivada de playerStart (era fragil, ver hardening Fase 4). */
+    public float freddyStartX = 0f;
+    public float freddyStartZ = 0f;
 }

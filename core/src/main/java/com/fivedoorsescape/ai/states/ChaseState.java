@@ -9,6 +9,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.fivedoorsescape.ecs.Mappers;
 import com.fivedoorsescape.ecs.components.AIComponent;
 import com.fivedoorsescape.ecs.components.AnimationComponent;
+import com.fivedoorsescape.ecs.components.CollisionComponent;
 import com.fivedoorsescape.ecs.components.TransformComponent;
 
 /** Avanza hacia el jugador cada frame y rota para encararlo. Atrapa o pierde el rastro segun distancia. */
@@ -17,6 +18,7 @@ public class ChaseState implements State<Entity> {
     public static final ChaseState INSTANCE = new ChaseState();
 
     private static final Vector3 tmpDireccion = new Vector3();
+    private static final Vector3 tmpDelta = new Vector3();
 
     private ChaseState() {
     }
@@ -38,7 +40,11 @@ public class ChaseState implements State<Entity> {
         TransformComponent propio = Mappers.transform.get(entity);
         TransformComponent delJugador = Mappers.transform.get(ai.objetivo);
 
-        float distancia = propio.position.dst(delJugador.position);
+        // Distancia horizontal (XZ) unicamente -- ver nota en IdleState sobre por que la 3D
+        // completa queda dominada por la diferencia de altura pies-vs-ojos y nunca se cierra.
+        tmpDireccion.set(delJugador.position).sub(propio.position);
+        tmpDireccion.y = 0f;
+        float distancia = tmpDireccion.len();
         if (distancia <= ai.rangoAtrape) {
             ai.stateMachine.changeState(CaughtState.INSTANCE);
             return;
@@ -48,14 +54,18 @@ public class ChaseState implements State<Entity> {
             return;
         }
 
-        tmpDireccion.set(delJugador.position).sub(propio.position);
-        tmpDireccion.y = 0f;
         if (tmpDireccion.len2() > 0.0001f) {
             tmpDireccion.nor();
             float deltaTime = Gdx.graphics.getDeltaTime();
-            propio.position.x += tmpDireccion.x * ai.velocidadPersecucion * deltaTime;
-            propio.position.z += tmpDireccion.z * ai.velocidadPersecucion * deltaTime;
             propio.yawDegrees = MathUtils.atan2(tmpDireccion.x, tmpDireccion.z) * MathUtils.radiansToDegrees;
+
+            tmpDelta.set(tmpDireccion).scl(ai.velocidadPersecucion * deltaTime);
+            if (ai.collisionWorld != null) {
+                CollisionComponent collision = Mappers.collision.get(entity);
+                propio.position.set(ai.collisionWorld.resolveMovement(propio.position, tmpDelta, collision.halfExtents));
+            } else {
+                propio.position.add(tmpDelta);
+            }
         }
     }
 

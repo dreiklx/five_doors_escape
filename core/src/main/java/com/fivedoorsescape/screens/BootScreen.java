@@ -81,5 +81,15 @@ public class BootScreen implements Screen {
 
     @Override
     public void dispose() {
+        // Solo se llega aqui si la aplicacion se cierra mientras todavia se esta cargando --
+        // en el flujo normal, Game.setScreen() no dispone la pantalla anterior, asi que este
+        // metodo nunca corre despues de transferir assets/batch/font a GameplayScreen.
+        if (batch != null) {
+            batch.dispose();
+        }
+        if (font != null) {
+            font.dispose();
+        }
+        assets.dispose();
     }
 }

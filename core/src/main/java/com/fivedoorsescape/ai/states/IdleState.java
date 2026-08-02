@@ -35,7 +35,12 @@ public class IdleState implements State<Entity> {
         }
         TransformComponent propio = Mappers.transform.get(entity);
         TransformComponent delJugador = Mappers.transform.get(ai.objetivo);
-        float distancia = propio.position.dst(delJugador.position);
+        // Distancia horizontal (XZ) unicamente: la Y del jugador es su altura de ojos (~1.6) y
+        // la de Freddy es la de sus pies (0) -- una distancia 3D completa quedaria siempre
+        // dominada por esa diferencia de altura, sin relacion con la cercania real.
+        float dx = propio.position.x - delJugador.position.x;
+        float dz = propio.position.z - delJugador.position.z;
+        float distancia = (float) Math.sqrt(dx * dx + dz * dz);
         if (distancia <= ai.rangoDeteccion) {
             ai.stateMachine.changeState(ChaseState.INSTANCE);
         }

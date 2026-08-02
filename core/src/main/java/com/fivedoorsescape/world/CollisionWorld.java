@@ -26,19 +26,20 @@ public class CollisionWorld {
         Vector3 result = new Vector3(position);
 
         result.x += delta.x;
-        if (collides(result, halfExtents)) {
+        if (overlapsStatic(result, halfExtents)) {
             result.x = position.x;
         }
 
         result.z += delta.z;
-        if (collides(result, halfExtents)) {
+        if (overlapsStatic(result, halfExtents)) {
             result.z = position.z;
         }
 
         return result;
     }
 
-    private boolean collides(Vector3 center, Vector3 halfExtents) {
+    /** True si una caja centrada en position, con esas semi-extensiones, se solapa con algun collider estatico. */
+    public boolean overlapsStatic(Vector3 center, Vector3 halfExtents) {
         tmpEntityBox.set(
                 new Vector3(center.x - halfExtents.x, center.y - halfExtents.y, center.z - halfExtents.z),
                 new Vector3(center.x + halfExtents.x, center.y + halfExtents.y, center.z + halfExtents.z)

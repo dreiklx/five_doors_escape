@@ -5,6 +5,7 @@ import com.badlogic.ashley.core.Entity;
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
@@ -42,7 +43,7 @@ import net.mgsx.gltf.scene3d.utils.IBLBuilder;
  * con colision, Freddy persigue al jugador via IA y al atraparlo transiciona a
  * NightGameOverScreen. Bonnie/Chica/Foxy quedan fuera de este slice a proposito.
  */
-public class GameplayScreen implements com.badlogic.gdx.Screen {
+public class GameplayScreen implements Screen {
 
     private final Game game;
     private final ContentRegistry registry;
@@ -94,10 +95,14 @@ public class GameplayScreen implements com.badlogic.gdx.Screen {
         Vector3 playerStart = new Vector3(mapDef.playerStartX, mapDef.playerStartY, mapDef.playerStartZ);
         playerEntity = factory.createPlayer(camera, playerStart, mapDef.playerStartYawDegrees);
 
-        Vector3 freddyStart = new Vector3(playerStart.x, 0f, playerStart.z + 5f);
+        Vector3 freddyStart = new Vector3(mapDef.freddyStartX, 0f, mapDef.freddyStartZ);
         freddyEntity = factory.createEntity("freddy", freddyStart, 0f);
         freddyAi = Mappers.ai.get(freddyEntity);
         freddyAi.objetivo = playerEntity;
+        freddyAi.collisionWorld = collisionWorld;
+
+        warnIfEmbedded("jugador", playerStart, Mappers.collision.get(playerEntity).halfExtents);
+        warnIfEmbedded("Freddy", freddyStart, Mappers.collision.get(freddyEntity).halfExtents);
 
         engine.addSystem(new AISystem());
         engine.addSystem(new AnimationSystem());
@@ -159,6 +164,19 @@ public class GameplayScreen implements com.badlogic.gdx.Screen {
             NightGameOverScreen gameOver = new NightGameOverScreen(game, handoff);
             game.setScreen(gameOver);
             dispose();
+        }
+    }
+
+    /**
+     * Advierte (sin corregir automaticamente) si un punto de spawn queda incrustado dentro de un
+     * collider estatico del mapa -- distinto de estar simplemente detras/oculto por uno, que es
+     * normal. Ajuste fino de posiciones queda para iteracion visual, no para logica automatica.
+     */
+    private void warnIfEmbedded(String nombre, Vector3 position, Vector3 halfExtents) {
+        if (collisionWorld.overlapsStatic(position, halfExtents)) {
+            Gdx.app.log("GameplayScreen", "ADVERTENCIA: el spawn de " + nombre + " en " + position
+                    + " esta incrustado dentro de un collider estatico del mapa -- revisar en "
+                    + "content/maps/pizzeria.json o el offset de spawn correspondiente.");
         }
     }
 
