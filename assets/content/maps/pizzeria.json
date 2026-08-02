@@ -1,0 +1,10 @@
+{
+    "id": "pizzeria",
+    "modelPath": "models/Pizzeria.glb",
+    "scale": 1.0,
+    "rotationXDegrees": 0.0,
+    "playerStartX": 1.1,
+    "playerStartY": 1.6,
+    "playerStartZ": 0.73,
+    "playerStartYawDegrees": 90.0
+}

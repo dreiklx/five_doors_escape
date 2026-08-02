@@ -1,0 +1,8 @@
+{
+    "id": "bonnie",
+    "modelPath": "models/Bonnie.glb",
+    "scale": 0.01545,
+    "rotationXDegrees": 180.0,
+    "animaciones": {},
+    "aiControlled": false
+}

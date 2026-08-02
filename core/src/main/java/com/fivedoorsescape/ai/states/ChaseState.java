@@ -1,0 +1,70 @@
+package com.fivedoorsescape.ai.states;
+
+import com.badlogic.ashley.core.Entity;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.ai.fsm.State;
+import com.badlogic.gdx.ai.msg.Telegram;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector3;
+import com.fivedoorsescape.ecs.Mappers;
+import com.fivedoorsescape.ecs.components.AIComponent;
+import com.fivedoorsescape.ecs.components.AnimationComponent;
+import com.fivedoorsescape.ecs.components.TransformComponent;
+
+/** Avanza hacia el jugador cada frame y rota para encararlo. Atrapa o pierde el rastro segun distancia. */
+public class ChaseState implements State<Entity> {
+
+    public static final ChaseState INSTANCE = new ChaseState();
+
+    private static final Vector3 tmpDireccion = new Vector3();
+
+    private ChaseState() {
+    }
+
+    @Override
+    public void enter(Entity entity) {
+        AnimationComponent animation = Mappers.animation.get(entity);
+        if (animation != null && animation.tieneAnimaciones()) {
+            animation.nombreLogicoActual = "walk";
+        }
+    }
+
+    @Override
+    public void update(Entity entity) {
+        AIComponent ai = Mappers.ai.get(entity);
+        if (ai.objetivo == null) {
+            return;
+        }
+        TransformComponent propio = Mappers.transform.get(entity);
+        TransformComponent delJugador = Mappers.transform.get(ai.objetivo);
+
+        float distancia = propio.position.dst(delJugador.position);
+        if (distancia <= ai.rangoAtrape) {
+            ai.stateMachine.changeState(CaughtState.INSTANCE);
+            return;
+        }
+        if (distancia > ai.rangoDeteccion * 1.5f) {
+            ai.stateMachine.changeState(IdleState.INSTANCE);
+            return;
+        }
+
+        tmpDireccion.set(delJugador.position).sub(propio.position);
+        tmpDireccion.y = 0f;
+        if (tmpDireccion.len2() > 0.0001f) {
+            tmpDireccion.nor();
+            float deltaTime = Gdx.graphics.getDeltaTime();
+            propio.position.x += tmpDireccion.x * ai.velocidadPersecucion * deltaTime;
+            propio.position.z += tmpDireccion.z * ai.velocidadPersecucion * deltaTime;
+            propio.yawDegrees = MathUtils.atan2(tmpDireccion.x, tmpDireccion.z) * MathUtils.radiansToDegrees;
+        }
+    }
+
+    @Override
+    public void exit(Entity entity) {
+    }
+
+    @Override
+    public boolean onMessage(Entity entity, Telegram telegram) {
+        return false;
+    }
+}

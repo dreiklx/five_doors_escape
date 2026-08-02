@@ -1,0 +1,11 @@
+{
+    "id": "freddy",
+    "modelPath": "models/Freddy.glb",
+    "scale": 10.0,
+    "rotationXDegrees": 180.0,
+    "animaciones": {
+        "idle": "Freddy_Idle",
+        "walk": "Freddy_Walk"
+    },
+    "aiControlled": true
+}
