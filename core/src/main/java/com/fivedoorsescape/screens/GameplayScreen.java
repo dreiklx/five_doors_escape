@@ -45,6 +45,15 @@ import net.mgsx.gltf.scene3d.utils.IBLBuilder;
  */
 public class GameplayScreen implements Screen {
 
+    /**
+     * Tope maximo de deltaTime usado para mover entidades en un solo frame. Sin esto, el primer
+     * frame renderizado tras la carga de assets (que toma varios segundos reales) trae un
+     * deltaTime enorme -- suficiente para que el jugador (o Freddy) atraviese de un salto el
+     * grosor de una pared limite delgada sin que ninguna posicion intermedia registre colision
+     * ("tunneling"). Confirmado en ejecucion real con un autopiloto de prueba antes de este fix.
+     */
+    private static final float MAX_FRAME_DELTA = 0.1f;
+
     private final Game game;
     private final ContentRegistry registry;
     private final AssetService assets;
@@ -142,22 +151,25 @@ public class GameplayScreen implements Screen {
             Gdx.input.setCursorCatched(!Gdx.input.isCursorCatched());
         }
 
+        float dt = Math.min(delta, MAX_FRAME_DELTA);
+
         cameraController.update();
 
         TransformComponent playerTransform = Mappers.transform.get(playerEntity);
         playerTransform.yawDegrees = cameraController.getYawDegrees();
 
-        Vector3 desiredDelta = cameraController.computeWasdDelta(delta);
+        Vector3 desiredDelta = cameraController.computeWasdDelta(dt);
+
         CollisionComponent playerCollision = Mappers.collision.get(playerEntity);
         Vector3 resolved = collisionWorld.resolveMovement(playerTransform.position, desiredDelta, playerCollision.halfExtents);
         playerTransform.position.set(resolved);
 
         cameraController.applyToCamera(playerTransform.position);
 
-        engine.update(delta);
+        engine.update(dt);
 
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-        sceneManager.update(delta);
+        sceneManager.update(dt);
         sceneManager.render();
 
         if (freddyAi.jugadorAtrapado) {

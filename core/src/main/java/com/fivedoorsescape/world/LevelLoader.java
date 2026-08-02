@@ -42,6 +42,14 @@ public class LevelLoader {
      */
     private static final float DEGENERATE_FOOTPRINT_FRACTION = 0.7f;
 
+    /**
+     * Grosor de las 4 paredes limite sinteticas que reemplazan al collider descartado arriba.
+     * Deliberadamente grueso (no un grosor de pared realista) como defensa adicional contra
+     * "tunneling" -- ver MAX_FRAME_DELTA en GameplayScreen/ChaseState para la causa raiz real
+     * que se corrigio (un deltaTime enorme en el primer frame tras la carga de assets).
+     */
+    private static final float BOUNDARY_WALL_THICKNESS = 1.5f;
+
     private final ContentRegistry registry;
     private final AssetService assets;
 
@@ -82,6 +90,36 @@ public class LevelLoader {
         for (Node node : nodes) {
             addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld);
         }
+
+        addBoundaryWalls(mapFootprint, collisionWorld);
+    }
+
+    /**
+     * Reemplaza el collider degenerado descartado arriba con 4 paredes limite delgadas, sinteticas
+     * (no derivadas de ningun nodo del mapa), alineadas con la huella total del edificio. Hallazgo
+     * real que motivo esto: sin ellas, el jugador podia caminar en linea recta y salir del mapa
+     * indefinidamente (probado con un autopiloto de prueba -- posicion X pasando de 300 unidades
+     * sin detenerse, cuando el mapa real solo mide ~27 de ancho). Las paredes reales del edificio
+     * parecen estar fusionadas en el mismo objeto que se filtra como "degenerado" arriba, asi que
+     * esta es la unica fuente de colision perimetral que le queda al jugador y a Freddy.
+     */
+    private void addBoundaryWalls(BoundingBox mapFootprint, CollisionWorld collisionWorld) {
+        float minX = mapFootprint.min.x;
+        float maxX = mapFootprint.max.x;
+        float minY = mapFootprint.min.y;
+        float maxY = mapFootprint.max.y;
+        float minZ = mapFootprint.min.z;
+        float maxZ = mapFootprint.max.z;
+        float t = BOUNDARY_WALL_THICKNESS;
+
+        collisionWorld.addStaticCollider(new BoundingBox(
+                new Vector3(minX - t, minY, minZ - t), new Vector3(maxX + t, maxY, minZ)));
+        collisionWorld.addStaticCollider(new BoundingBox(
+                new Vector3(minX - t, minY, maxZ), new Vector3(maxX + t, maxY, maxZ + t)));
+        collisionWorld.addStaticCollider(new BoundingBox(
+                new Vector3(minX - t, minY, minZ - t), new Vector3(minX, maxY, maxZ + t)));
+        collisionWorld.addStaticCollider(new BoundingBox(
+                new Vector3(maxX, minY, minZ - t), new Vector3(maxX + t, maxY, maxZ + t)));
     }
 
     private void addNodeAndChildren(Node node, Matrix4 instanceTransform, Vector3 mapDims,
