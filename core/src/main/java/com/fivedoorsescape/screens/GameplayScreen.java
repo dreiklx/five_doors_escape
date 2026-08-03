@@ -11,6 +11,9 @@ import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
 
 import com.fivedoorsescape.assets.AssetService;
@@ -54,6 +57,14 @@ public class GameplayScreen implements Screen {
      */
     private static final float MAX_FRAME_DELTA = 0.1f;
 
+    // Boton discreto de salida manual (esquina superior izquierda, ver memoria de Claude
+    // "project-libgdx-office-spawn-exit-design"): solo responde a clics cuando el cursor no
+    // esta capturado (ESC libera el cursor, ver isKeyJustPressed(ESCAPE) mas abajo) -- con el
+    // cursor capturado para mouse-look no hay una posicion de mouse visible que reciba el clic.
+    private static final float BOTON_SALIR_ANCHO = 140f;
+    private static final float BOTON_SALIR_ALTO = 44f;
+    private static final float BOTON_SALIR_MARGEN = 16f;
+
     private final Game game;
     private final ContentRegistry registry;
     private final AssetService assets;
@@ -76,6 +87,10 @@ public class GameplayScreen implements Screen {
     private Cubemap specularCubemap;
     private Texture brdfLUT;
     private SceneSkybox skybox;
+
+    private SpriteBatch uiBatch;
+    private BitmapFont uiFont;
+    private ShapeRenderer uiShapes;
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -143,6 +158,12 @@ public class GameplayScreen implements Screen {
 
         skybox = new SceneSkybox(environmentCubemap);
         sceneManager.setSkyBox(skybox);
+
+        uiBatch = new SpriteBatch();
+        uiFont = new BitmapFont();
+        uiFont.getData().setScale(1.3f);
+        uiFont.setColor(Color.WHITE);
+        uiShapes = new ShapeRenderer();
     }
 
     @Override
@@ -172,10 +193,54 @@ public class GameplayScreen implements Screen {
         sceneManager.update(dt);
         sceneManager.render();
 
+        manejarBotonSalir();
+
         if (freddyAi.jugadorAtrapado) {
             NightGameOverScreen gameOver = new NightGameOverScreen(game, handoff);
             game.setScreen(gameOver);
             dispose();
+        }
+    }
+
+    /**
+     * Dibuja el boton de salida manual y responde al clic. El clic solo se evalua con el cursor
+     * liberado (ESC lo libera/recaptura, ver arriba) -- con el cursor capturado para mouse-look
+     * su posicion no representa un punto real que el jugador este viendo/apuntando.
+     */
+    private void manejarBotonSalir() {
+        float x = BOTON_SALIR_MARGEN;
+        // Y-up estandar de SpriteBatch/ShapeRenderer: valor grande = cerca del borde superior
+        // real de la pantalla. (Nota: las capturas de pantalla tomadas con
+        // PixmapIO.writePNG(file, pixmap) de 2 argumentos NO reflejan esto correctamente --
+        // esa sobrecarga usa flipY=false internamente, produciendo una imagen espejada
+        // verticalmente respecto a la pantalla real. Confirmado leyendo el codigo fuente de
+        // gdx-1.14.2-sources.jar. No usar esa sobrecarga para diagnosticos visuales futuros --
+        // usar la de 4 argumentos con flipY=true.)
+        float yDibujo = Gdx.graphics.getHeight() - BOTON_SALIR_MARGEN - BOTON_SALIR_ALTO;
+
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(0f, 0f, 0f, 0.55f);
+        uiShapes.rect(x, yDibujo, BOTON_SALIR_ANCHO, BOTON_SALIR_ALTO);
+        uiShapes.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+
+        String texto = handoff.idioma == HandoffData.Idioma.INGLES ? "Exit" : "Salir";
+        uiBatch.begin();
+        uiFont.draw(uiBatch, texto, x + 20f, yDibujo + BOTON_SALIR_ALTO - 13f);
+        uiBatch.end();
+
+        if (!Gdx.input.isCursorCatched() && Gdx.input.justTouched()) {
+            float touchX = Gdx.input.getX();
+            float touchYDesdeArriba = Gdx.input.getY();
+            boolean dentroX = touchX >= x && touchX <= x + BOTON_SALIR_ANCHO;
+            boolean dentroY = touchYDesdeArriba >= BOTON_SALIR_MARGEN && touchYDesdeArriba <= BOTON_SALIR_MARGEN + BOTON_SALIR_ALTO;
+            if (dentroX && dentroY) {
+                Gdx.app.exit();
+            }
         }
     }
 
@@ -217,6 +282,9 @@ public class GameplayScreen implements Screen {
         specularCubemap.dispose();
         brdfLUT.dispose();
         skybox.dispose();
+        uiBatch.dispose();
+        uiFont.dispose();
+        uiShapes.dispose();
         assets.dispose();
     }
 }
