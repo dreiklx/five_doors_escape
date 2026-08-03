@@ -15,8 +15,9 @@ import com.fivedoorsescape.io.HandoffReader;
 
 /**
  * Lee el traspaso Swing->LibGDX, decide explicitamente que contenido cargar para esta sesion
- * (solo el mapa y Freddy en el MVP -- Bonnie/Chica/Foxy quedan fuera de alcance, ver
- * Architecture.md #2.2) y transiciona a GameplayScreen cuando termina.
+ * (el mapa y los 4 personajes -- Bonnie/Chica/Foxy ya no estan fuera de alcance, ver decision de
+ * diseno del usuario 2026-08-02/03: guardias estaticos ademas de Freddy) y transiciona a
+ * GameplayScreen cuando termina.
  */
 public class BootScreen implements Screen {
 
@@ -39,9 +40,11 @@ public class BootScreen implements Screen {
         font = new BitmapFont();
 
         MapDefinition mapDef = registry.getMapDefinition("pizzeria");
-        EntityDefinition freddyDef = registry.getEntityDefinition("freddy");
         assets.queueModel(mapDef.modelPath);
-        assets.queueModel(freddyDef.modelPath);
+        for (String entityId : new String[] {"freddy", "bonnie", "chica", "foxy"}) {
+            EntityDefinition def = registry.getEntityDefinition(entityId);
+            assets.queueModel(def.modelPath);
+        }
     }
 
     @Override

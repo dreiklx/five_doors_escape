@@ -11,5 +11,11 @@
     "freddyStartZ": 10.0,
     "exitX": -7.5,
     "exitZ": -7.5,
-    "exitRadius": 1.5
+    "exitRadius": 1.5,
+    "bonnieStartX": 9.0,
+    "bonnieStartZ": 1.5,
+    "chicaStartX": 3.0,
+    "chicaStartZ": 2.0,
+    "foxyStartX": 2.0,
+    "foxyStartZ": -6.5
 }

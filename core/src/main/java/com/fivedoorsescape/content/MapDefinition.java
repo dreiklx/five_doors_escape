@@ -25,4 +25,13 @@ public class MapDefinition {
     public float exitX = 0f;
     public float exitZ = 0f;
     public float exitRadius = 1.5f;
+
+    /** Posiciones fijas de guardia de Bonnie/Chica/Foxy (IdleState -- no patrullan, ver decision
+     * de diseno del usuario 2026-08-02/03). */
+    public float bonnieStartX = 0f;
+    public float bonnieStartZ = 0f;
+    public float chicaStartX = 0f;
+    public float chicaStartZ = 0f;
+    public float foxyStartX = 0f;
+    public float foxyStartZ = 0f;
 }

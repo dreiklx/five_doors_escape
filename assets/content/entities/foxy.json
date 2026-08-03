@@ -4,5 +4,5 @@
     "scale": 0.095,
     "rotationXDegrees": 0.0,
     "animaciones": {},
-    "aiControlled": false
+    "aiControlled": true
 }

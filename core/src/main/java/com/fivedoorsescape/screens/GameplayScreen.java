@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.Array;
 
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.camera.FirstPersonCameraController;
@@ -79,8 +80,7 @@ public class GameplayScreen implements Screen {
     private FirstPersonCameraController cameraController;
 
     private Entity playerEntity;
-    private Entity freddyEntity;
-    private AIComponent freddyAi;
+    private final Array<AIComponent> guardias = new Array<>();
 
     private Cubemap diffuseCubemap;
     private Cubemap environmentCubemap;
@@ -130,24 +130,36 @@ public class GameplayScreen implements Screen {
 
         Vector3 playerStart = new Vector3(mapDef.playerStartX, mapDef.playerStartY, mapDef.playerStartZ);
         playerEntity = factory.createPlayer(camera, playerStart, mapDef.playerStartYawDegrees);
-
-        Vector3 freddyStart = new Vector3(mapDef.freddyStartX, 0f, mapDef.freddyStartZ);
-        freddyEntity = factory.createEntity("freddy", freddyStart, 0f);
-        freddyAi = Mappers.ai.get(freddyEntity);
-        freddyAi.objetivo = playerEntity;
-        freddyAi.collisionWorld = collisionWorld;
-
         warnIfEmbedded("jugador", playerStart, Mappers.collision.get(playerEntity).halfExtents);
-        warnIfEmbedded("Freddy", freddyStart, Mappers.collision.get(freddyEntity).halfExtents);
 
         engine.addSystem(new AISystem());
         engine.addSystem(new AnimationSystem());
         engine.addSystem(new RenderSyncSystem());
 
-        int numBones = Math.max(assets.getModel(registry.getEntityDefinition("freddy").modelPath).maxBones, 1);
+        int numBones = 1;
+
+        Vector3 freddyStart = new Vector3(mapDef.freddyStartX, 0f, mapDef.freddyStartZ);
+        numBones = Math.max(numBones, crearGuardia(factory, "freddy", freddyStart, "Freddy"));
+
+        // Bonnie/Chica/Foxy: guardias estaticos en un punto fijo (IdleState -- no patrullan, ver
+        // decision de diseno del usuario). Reutilizan exactamente el mismo IdleState/ChaseState/
+        // CaughtState generico que ya usaba Freddy -- ninguno es especifico de un personaje.
+        Vector3 bonnieStart = new Vector3(mapDef.bonnieStartX, 0f, mapDef.bonnieStartZ);
+        numBones = Math.max(numBones, crearGuardia(factory, "bonnie", bonnieStart, "Bonnie"));
+
+        Vector3 chicaStart = new Vector3(mapDef.chicaStartX, 0f, mapDef.chicaStartZ);
+        numBones = Math.max(numBones, crearGuardia(factory, "chica", chicaStart, "Chica"));
+
+        Vector3 foxyStart = new Vector3(mapDef.foxyStartX, 0f, mapDef.foxyStartZ);
+        numBones = Math.max(numBones, crearGuardia(factory, "foxy", foxyStart, "Foxy"));
+
         sceneManager = new SceneManager(PBRShaderProvider.createDefault(numBones), PBRShaderProvider.createDefaultDepth(numBones));
         sceneManager.addScene(mapScene);
-        sceneManager.addScene(Mappers.model.get(freddyEntity).scene);
+        for (Entity guardia : engine.getEntities()) {
+            if (Mappers.model.has(guardia)) {
+                sceneManager.addScene(Mappers.model.get(guardia).scene);
+            }
+        }
         sceneManager.setCamera(camera);
 
         DirectionalLightEx light = new DirectionalLightEx();
@@ -211,12 +223,20 @@ public class GameplayScreen implements Screen {
         float dzSalida = playerTransform.position.z - exitZ;
         boolean llegoALaSalida = (dxSalida * dxSalida + dzSalida * dzSalida) <= exitRadius * exitRadius;
 
+        boolean algunGuardiaAtrapo = false;
+        for (AIComponent ai : guardias) {
+            if (ai.jugadorAtrapado) {
+                algunGuardiaAtrapo = true;
+                break;
+            }
+        }
+
         if (llegoALaSalida && !escapado) {
             escapado = true;
             EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
             game.setScreen(victoria);
             dispose();
-        } else if (freddyAi.jugadorAtrapado) {
+        } else if (algunGuardiaAtrapo) {
             NightGameOverScreen gameOver = new NightGameOverScreen(game, handoff);
             game.setScreen(gameOver);
             dispose();
@@ -263,6 +283,23 @@ public class GameplayScreen implements Screen {
                 Gdx.app.exit();
             }
         }
+    }
+
+    /**
+     * Crea un personaje con IA (Freddy o un guardia estatico), lo registra en {@link #guardias}
+     * para el chequeo de atrapada y devuelve el maxBones de su modelo (para dimensionar el
+     * shader compartido de SceneManager al hueso mas exigente entre todos los personajes).
+     */
+    private int crearGuardia(EntityFactory factory, String entityId, Vector3 posicion, String nombreParaLog) {
+        Entity entidad = factory.createEntity(entityId, posicion, 0f);
+        AIComponent ai = Mappers.ai.get(entidad);
+        ai.objetivo = playerEntity;
+        ai.collisionWorld = collisionWorld;
+        guardias.add(ai);
+
+        warnIfEmbedded(nombreParaLog, posicion, Mappers.collision.get(entidad).halfExtents);
+
+        return Math.max(assets.getModel(registry.getEntityDefinition(entityId).modelPath).maxBones, 1);
     }
 
     /**
