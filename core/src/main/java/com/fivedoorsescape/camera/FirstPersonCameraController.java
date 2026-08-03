@@ -77,4 +77,10 @@ public class FirstPersonCameraController {
     public float getYawDegrees() {
         return yawDegrees;
     }
+
+    /** Reinicia la orientacion (usado al reaparecer tras ser atrapado, ver mecanica de vidas). */
+    public void resetOrientation(float yawDegreesNuevo) {
+        this.yawDegrees = yawDegreesNuevo;
+        this.pitchDegrees = 0f;
+    }
 }

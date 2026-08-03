@@ -45,6 +45,13 @@ public class BootScreen implements Screen {
             EntityDefinition def = registry.getEntityDefinition(entityId);
             assets.queueModel(def.modelPath);
         }
+
+        // Sonidos de la secuencia de atrapada (2 vidas, ver decision de diseno del usuario
+        // 2026-08-03): un jumpscare y una estatica genericos, reutilizados del pool de assets
+        // FDAF con aprobacion explicita del usuario (no son exclusivos de un personaje ni del
+        // proyecto Swing en si -- Swing tampoco tiene sonido distinto por animatronico).
+        assets.queueSound(GameplayScreen.SONIDO_JUMPSCARE);
+        assets.queueSound(GameplayScreen.SONIDO_ESTATICA);
     }
 
     @Override

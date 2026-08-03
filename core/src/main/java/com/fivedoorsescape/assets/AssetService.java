@@ -3,6 +3,7 @@ package com.fivedoorsescape.assets;
 import com.badlogic.gdx.assets.AssetManager;
 import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
+import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.utils.Disposable;
 
 import net.mgsx.gltf.loaders.glb.GLBAssetLoader;
@@ -29,6 +30,10 @@ public class AssetService implements Disposable {
         assetManager.load(path, SceneAsset.class);
     }
 
+    public void queueSound(String path) {
+        assetManager.load(path, Sound.class);
+    }
+
     public boolean update() {
         return assetManager.update();
     }
@@ -47,6 +52,10 @@ public class AssetService implements Disposable {
 
     public boolean isLoaded(String path) {
         return assetManager.isLoaded(path, SceneAsset.class);
+    }
+
+    public Sound getSound(String path) {
+        return assetManager.get(path, Sound.class);
     }
 
     @Override
