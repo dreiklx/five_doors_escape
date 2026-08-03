@@ -20,4 +20,9 @@ public class MapDefinition {
     /** Posicion inicial de Freddy -- fija, no derivada de playerStart (era fragil, ver hardening Fase 4). */
     public float freddyStartX = 0f;
     public float freddyStartZ = 0f;
+
+    /** Punto de salida (condicion de victoria del Escape): distancia horizontal (X/Z). */
+    public float exitX = 0f;
+    public float exitZ = 0f;
+    public float exitRadius = 1.5f;
 }

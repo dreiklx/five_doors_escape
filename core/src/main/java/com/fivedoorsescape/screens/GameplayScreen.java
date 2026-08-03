@@ -92,6 +92,14 @@ public class GameplayScreen implements Screen {
     private BitmapFont uiFont;
     private ShapeRenderer uiShapes;
 
+    // Condicion de victoria del Escape (expande el MVP original, aprobado explicitamente por el
+    // usuario -- ver memoria de Claude "project-libgdx-office-spawn-exit-design"): distancia
+    // horizontal (X/Z) del jugador al punto de salida definido en el mapa.
+    private float exitX;
+    private float exitZ;
+    private float exitRadius;
+    private boolean escapado = false;
+
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
         this.registry = registry;
@@ -108,6 +116,10 @@ public class GameplayScreen implements Screen {
         mapScene = levelLoader.loadMapScene("pizzeria");
         levelLoader.buildStaticColliders(mapScene, collisionWorld);
         Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
+
+        exitX = mapDef.exitX;
+        exitZ = mapDef.exitZ;
+        exitRadius = mapDef.exitRadius;
 
         camera = new PerspectiveCamera(67f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.near = 0.05f;
@@ -195,7 +207,16 @@ public class GameplayScreen implements Screen {
 
         manejarBotonSalir();
 
-        if (freddyAi.jugadorAtrapado) {
+        float dxSalida = playerTransform.position.x - exitX;
+        float dzSalida = playerTransform.position.z - exitZ;
+        boolean llegoALaSalida = (dxSalida * dxSalida + dzSalida * dzSalida) <= exitRadius * exitRadius;
+
+        if (llegoALaSalida && !escapado) {
+            escapado = true;
+            EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
+            game.setScreen(victoria);
+            dispose();
+        } else if (freddyAi.jugadorAtrapado) {
             NightGameOverScreen gameOver = new NightGameOverScreen(game, handoff);
             game.setScreen(gameOver);
             dispose();

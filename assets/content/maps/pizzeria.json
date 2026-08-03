@@ -3,10 +3,13 @@
     "modelPath": "models/Pizzeria.glb",
     "scale": 1.0,
     "rotationXDegrees": 0.0,
-    "playerStartX": 1.1,
+    "playerStartX": 0.0,
     "playerStartY": 1.6,
-    "playerStartZ": 1.5,
-    "playerStartYawDegrees": 90.0,
+    "playerStartZ": 8.6,
+    "playerStartYawDegrees": 0.0,
     "freddyStartX": 4.0,
-    "freddyStartZ": 2.0
+    "freddyStartZ": 2.0,
+    "exitX": -7.5,
+    "exitZ": -7.5,
+    "exitRadius": 1.5
 }
