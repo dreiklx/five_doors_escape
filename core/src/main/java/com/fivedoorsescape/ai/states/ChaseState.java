@@ -22,8 +22,16 @@ public class ChaseState implements State<Entity> {
      * delgada sin que ninguna posicion intermedia registre colision. */
     private static final float MAX_FRAME_DELTA = 0.1f;
 
+    /** Ventana de muestreo para detectar atasco (ver comentario mas abajo). */
+    private static final float INTERVALO_MUESTRA = 0.3f;
+    /** Avance minimo esperado en una ventana de muestreo para NO considerarse atascado. */
+    private static final float AVANCE_MINIMO = 0.15f;
+    /** Tiempo atascado antes de aplicar el empujon lateral. */
+    private static final float UMBRAL_ATASCO = 0.6f;
+
     private static final Vector3 tmpDireccion = new Vector3();
     private static final Vector3 tmpDelta = new Vector3();
+    private static final Vector3 tmpMovimiento = new Vector3();
 
     private ChaseState() {
     }
@@ -64,7 +72,34 @@ public class ChaseState implements State<Entity> {
             float deltaTime = Math.min(Gdx.graphics.getDeltaTime(), MAX_FRAME_DELTA);
             propio.yawDegrees = MathUtils.atan2(tmpDireccion.x, tmpDireccion.z) * MathUtils.radiansToDegrees;
 
-            tmpDelta.set(tmpDireccion).scl(ai.velocidadPersecucion * deltaTime);
+            // Deteccion de atasco: la persecucion es una linea recta hacia el objetivo con
+            // resolucion de colision eje por eje (X, luego Z) -- si esa linea recta pasa lo
+            // bastante cerca de la esquina de un obstaculo delgado (p.ej. el marco de una puerta),
+            // el eje bloqueado puede quedar congelado para siempre mientras el otro eje sigue
+            // "avanzando" sin cerrar la distancia real (confirmado en ejecucion real: Freddy
+            // atascado indefinidamente contra el marco de la puerta de la oficina). Sin
+            // pathfinding real en el MVP, la solucion pragmatica es detectar la falta de avance
+            // real y aplicar un empujon lateral perpendicular para rodear el obstaculo.
+            actualizarDeteccionAtasco(ai, propio, deltaTime);
+
+            if (ai.tiempoAtascado > UMBRAL_ATASCO) {
+                // Un empujon perpendicular generico puede empujar hacia el lado equivocado
+                // segun la geometria exacta (confirmado en ejecucion real: empeoraba el atasco
+                // en vez de resolverlo). En cambio, moverse en linea recta por el eje horizontal
+                // con mayor diferencia respecto al objetivo es lo que realmente hace falta para
+                // deslizarse hacia el centro de un hueco angosto (puerta) y liberar el otro eje.
+                float diferenciaX = delJugador.position.x - propio.position.x;
+                float diferenciaZ = delJugador.position.z - propio.position.z;
+                if (Math.abs(diferenciaX) >= Math.abs(diferenciaZ)) {
+                    tmpMovimiento.set(Math.signum(diferenciaX), 0f, 0f);
+                } else {
+                    tmpMovimiento.set(0f, 0f, Math.signum(diferenciaZ));
+                }
+            } else {
+                tmpMovimiento.set(tmpDireccion);
+            }
+
+            tmpDelta.set(tmpMovimiento).scl(ai.velocidadPersecucion * deltaTime);
             if (ai.collisionWorld != null) {
                 CollisionComponent collision = Mappers.collision.get(entity);
                 propio.position.set(ai.collisionWorld.resolveMovement(propio.position, tmpDelta, collision.halfExtents));
@@ -72,6 +107,25 @@ public class ChaseState implements State<Entity> {
                 propio.position.add(tmpDelta);
             }
         }
+    }
+
+    private void actualizarDeteccionAtasco(AIComponent ai, TransformComponent propio, float deltaTime) {
+        if (Float.isNaN(ai.posicionMuestreada.x)) {
+            ai.posicionMuestreada.set(propio.position);
+            return;
+        }
+        ai.temporizadorMuestra += deltaTime;
+        if (ai.temporizadorMuestra < INTERVALO_MUESTRA) {
+            return;
+        }
+        float avance = propio.position.dst(ai.posicionMuestreada);
+        if (avance < AVANCE_MINIMO) {
+            ai.tiempoAtascado += ai.temporizadorMuestra;
+        } else {
+            ai.tiempoAtascado = 0f;
+        }
+        ai.posicionMuestreada.set(propio.position);
+        ai.temporizadorMuestra = 0f;
     }
 
     @Override
