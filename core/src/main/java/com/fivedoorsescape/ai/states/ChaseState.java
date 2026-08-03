@@ -29,6 +29,12 @@ public class ChaseState implements State<Entity> {
     /** Tiempo atascado antes de aplicar el empujon lateral. */
     private static final float UMBRAL_ATASCO = 0.6f;
 
+    /**
+     * Ventana de tiempo (segundos) que se le da a cada estrategia de desatasco antes de rotar a
+     * la siguiente (ver comentario en el bloque de deteccion de atasco mas abajo).
+     */
+    private static final float VENTANA_ALTERNANCIA_EJE = 1.5f;
+
     private static final Vector3 tmpDireccion = new Vector3();
     private static final Vector3 tmpDelta = new Vector3();
     private static final Vector3 tmpMovimiento = new Vector3();
@@ -79,21 +85,49 @@ public class ChaseState implements State<Entity> {
             // "avanzando" sin cerrar la distancia real (confirmado en ejecucion real: Freddy
             // atascado indefinidamente contra el marco de la puerta de la oficina). Sin
             // pathfinding real en el MVP, la solucion pragmatica es detectar la falta de avance
-            // real y aplicar un empujon lateral perpendicular para rodear el obstaculo.
-            actualizarDeteccionAtasco(ai, propio, deltaTime);
+            // real y aplicar un empujon lateral perpendicular para rodear el obstaculo. Se mide el
+            // progreso por la DISTANCIA AL OBJETIVO, no por el desplazamiento crudo -- deslizarse
+            // a lo largo de una pared sin acercarse tambien cuenta como atasco (confirmado en
+            // ejecucion real: sin esto, un guardia oscilaba de un lado a otro de una pared nueva
+            // sin avanzar nunca, porque el desplazamiento crudo de cada oscilacion ya superaba el
+            // umbral y reiniciaba el contador de atasco antes de completar una estrategia).
+            actualizarDeteccionAtasco(ai, distancia, deltaTime);
 
             if (ai.tiempoAtascado > UMBRAL_ATASCO) {
                 // Un empujon perpendicular generico puede empujar hacia el lado equivocado
                 // segun la geometria exacta (confirmado en ejecucion real: empeoraba el atasco
                 // en vez de resolverlo). En cambio, moverse en linea recta por el eje horizontal
                 // con mayor diferencia respecto al objetivo es lo que realmente hace falta para
-                // deslizarse hacia el centro de un hueco angosto (puerta) y liberar el otro eje.
+                // deslizarse hacia el centro de un hueco angosto (puerta) y liberar el otro eje --
+                // esto resuelve el caso original (Freddy contra el marco de la puerta).
+                //
+                // Pero esta estrategia por si sola NO alcanza cuando el objetivo esta perfectamente
+                // alineado en el eje bloqueado (diferencia ~0 en el otro eje) y hay una pared recta
+                // -- no un marco angosto -- exactamente en medio: el eje "prioritario" es siempre
+                // el mismo eje ya bloqueado, asi que nunca se libera (confirmado en ejecucion real:
+                // un guardia quedo congelado indefinidamente contra una pared interior nueva tras
+                // recuperar su colision, con el jugador de prueba exactamente al mismo Z). Por eso
+                // esta logica rota entre 3 estrategias cada VENTANA_ALTERNANCIA_EJE segundos
+                // mientras el atasco persista: el eje prioritario primero, y si no alcanza, probar
+                // el otro eje a mano en ambos sentidos (+ y -) para "tantear" un hueco lateral que
+                // el signo real (posiblemente cero) no puede indicar por si solo.
                 float diferenciaX = delJugador.position.x - propio.position.x;
                 float diferenciaZ = delJugador.position.z - propio.position.z;
-                if (Math.abs(diferenciaX) >= Math.abs(diferenciaZ)) {
-                    tmpMovimiento.set(Math.signum(diferenciaX), 0f, 0f);
+                boolean ejeXesPrioritario = Math.abs(diferenciaX) >= Math.abs(diferenciaZ);
+                long fase = (long) ((ai.tiempoAtascado - UMBRAL_ATASCO) / VENTANA_ALTERNANCIA_EJE) % 3;
+                if (fase == 0) {
+                    if (ejeXesPrioritario) {
+                        tmpMovimiento.set(Math.signum(diferenciaX), 0f, 0f);
+                    } else {
+                        tmpMovimiento.set(0f, 0f, Math.signum(diferenciaZ));
+                    }
                 } else {
-                    tmpMovimiento.set(0f, 0f, Math.signum(diferenciaZ));
+                    float signoSondeo = fase == 1 ? 1f : -1f;
+                    if (ejeXesPrioritario) {
+                        tmpMovimiento.set(0f, 0f, signoSondeo);
+                    } else {
+                        tmpMovimiento.set(signoSondeo, 0f, 0f);
+                    }
                 }
             } else {
                 tmpMovimiento.set(tmpDireccion);
@@ -109,22 +143,22 @@ public class ChaseState implements State<Entity> {
         }
     }
 
-    private void actualizarDeteccionAtasco(AIComponent ai, TransformComponent propio, float deltaTime) {
-        if (Float.isNaN(ai.posicionMuestreada.x)) {
-            ai.posicionMuestreada.set(propio.position);
+    private void actualizarDeteccionAtasco(AIComponent ai, float distanciaActual, float deltaTime) {
+        if (Float.isNaN(ai.distanciaMuestreada)) {
+            ai.distanciaMuestreada = distanciaActual;
             return;
         }
         ai.temporizadorMuestra += deltaTime;
         if (ai.temporizadorMuestra < INTERVALO_MUESTRA) {
             return;
         }
-        float avance = propio.position.dst(ai.posicionMuestreada);
+        float avance = ai.distanciaMuestreada - distanciaActual;
         if (avance < AVANCE_MINIMO) {
             ai.tiempoAtascado += ai.temporizadorMuestra;
         } else {
             ai.tiempoAtascado = 0f;
         }
-        ai.posicionMuestreada.set(propio.position);
+        ai.distanciaMuestreada = distanciaActual;
         ai.temporizadorMuestra = 0f;
     }
 

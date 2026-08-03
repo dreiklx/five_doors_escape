@@ -1,12 +1,18 @@
 package com.fivedoorsescape.world;
 
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
+import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.LongMap;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.content.ContentRegistry;
 import com.fivedoorsescape.content.MapDefinition;
@@ -41,6 +47,34 @@ public class LevelLoader {
      * de la profundidad del mapa a la vez es inutil como collider solido, asi que se excluye.
      */
     private static final float DEGENERATE_FOOTPRINT_FRACTION = 0.7f;
+
+    /**
+     * Tamano de celda (en unidades de mundo, plano XZ) usada para subdividir un nodo "degenerado"
+     * (arriba) en varios colliders mas pequenos derivados de su geometria real, en vez de
+     * descartarlo por completo. Hallazgo real que motivo esto: el nodo degenerado resulto ser
+     * TODAS las paredes del edificio (interiores y exteriores) fusionadas en una sola malla -- al
+     * descartarlo entero para evitar bloquear todo el interior, tambien se perdio la colision de
+     * CUALQUIER pared interior real (se podia atravesar cualquier pared que no fuera el perimetro
+     * exterior sintetico). Este tamano de celda es menor que un hueco de puerta tipico (~1 unidad)
+     * para no bloquear pasillos reales, pero mayor que el grosor tipico de una pared para agrupar
+     * su geometria en una sola caja por celda.
+     */
+    private static final float WALL_GRID_CELL_SIZE = 0.2f;
+
+    /** Dimension minima de una celda de pared subdividida para contar como collider real (evita
+     * cajas de grosor casi nulo por triangulos que solo rozan el borde de una celda). */
+    private static final float WALL_CELL_MIN_DIMENSION = 0.05f;
+
+    /**
+     * Altura minima (Y) para que un nodo "degenerado" (spansWholeFootprint) se subdivida en vez
+     * de descartarse silenciosamente. Sin este filtro, el piso (Object_6, delgado en Y, a nivel
+     * del suelo) tambien se subdividiria -- y como su rango de Y se solapa con la caja de colision
+     * de los personajes con IA (que estan centrados en Y=0, no a la altura de ojos del jugador),
+     * el piso entero bloquearia a Freddy/Bonnie/Chica/Foxy en cada celda de la grilla. Las paredes
+     * reales (altura completa del edificio, ~2.96) quedan muy por encima de este umbral; el piso
+     * y la malla delgada de techo/lamparas quedan muy por debajo.
+     */
+    private static final float WALL_MIN_HEIGHT = 1.0f;
 
     /**
      * Grosor de las 4 paredes limite sinteticas que reemplazan al collider descartado arriba.
@@ -81,17 +115,71 @@ public class LevelLoader {
         return mapScene;
     }
 
+    /**
+     * Margen (unidades de mundo, en X/Z) que se suma alrededor de la huella de una puerta real al
+     * despejarla de colision. Sin margen, el hueco libre coincidiria exactamente con el ancho de
+     * la hoja de puerta modelada -- que puede ser mas angosto que la caja de colision del jugador
+     * (semi-extension 0.3, es decir 0.6 de ancho total), dejando la puerta "abierta" pero
+     * igualmente intransitable.
+     */
+    private static final float DOOR_CLEARANCE_MARGIN = 0.4f;
+
     public void buildStaticColliders(Scene mapScene, CollisionWorld collisionWorld) {
         BoundingBox mapFootprint = new BoundingBox();
         mapScene.modelInstance.calculateBoundingBox(mapFootprint);
         Vector3 mapDims = mapFootprint.getDimensions(new Vector3());
 
+        Array<BoundingBox> puertaZonas = new Array<>();
         Array<Node> nodes = mapScene.modelInstance.nodes;
         for (Node node : nodes) {
-            addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld);
+            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas);
+        }
+
+        for (Node node : nodes) {
+            addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld, puertaZonas);
         }
 
         addBoundaryWalls(mapFootprint, collisionWorld);
+    }
+
+    /**
+     * Recorre el arbol buscando nodos cuyo ancestro sea una puerta real (ver esParteDePuerta) y
+     * guarda su huella X/Z (expandida por DOOR_CLEARANCE_MARGIN) para despejarla de colision mas
+     * adelante -- tanto de si misma como de cualquier celda de pared subdividida que la cubra.
+     */
+    private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out) {
+        if (node.parts.size > 0 && esParteDePuerta(node)) {
+            BoundingBox nodeBox = new BoundingBox();
+            node.calculateBoundingBox(nodeBox, true);
+            if (nodeBox.isValid()) {
+                nodeBox.mul(instanceTransform);
+                nodeBox.min.x -= DOOR_CLEARANCE_MARGIN;
+                nodeBox.max.x += DOOR_CLEARANCE_MARGIN;
+                nodeBox.min.z -= DOOR_CLEARANCE_MARGIN;
+                nodeBox.max.z += DOOR_CLEARANCE_MARGIN;
+                out.add(nodeBox);
+            }
+        }
+        for (Node child : node.getChildren()) {
+            collectDoorZones(child, instanceTransform, out);
+        }
+    }
+
+    /**
+     * True si la huella X/Z de candidato se solapa con la de alguna zona de puerta (ya expandida
+     * por el margen). Deliberadamente ignora Y -- se trata la puerta como un hueco de piso a
+     * techo en esa franja angosta, no solo del alto exacto de la hoja modelada (que puede ser mas
+     * baja que la caja de colision del jugador mas el dintel solido justo encima).
+     */
+    private boolean dentroDeZonaPuerta(BoundingBox candidato, Array<BoundingBox> puertaZonas) {
+        for (BoundingBox zona : puertaZonas) {
+            boolean seSolapaEnX = candidato.min.x <= zona.max.x && candidato.max.x >= zona.min.x;
+            boolean seSolapaEnZ = candidato.min.z <= zona.max.z && candidato.max.z >= zona.min.z;
+            if (seSolapaEnX && seSolapaEnZ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -122,8 +210,165 @@ public class LevelLoader {
                 new Vector3(maxX, minY, minZ - t), new Vector3(maxX + t, maxY, maxZ + t)));
     }
 
+    /**
+     * Acumulador de una celda de la grilla: rango real de Y observado (de los triangulos que
+     * caen en esa celda) mas el rango real de X/Z observado (recortado a los limites de la
+     * celda), para que el collider resultante no sea mas grande que la geometria real que
+     * contiene.
+     */
+    private static final class CeldaAcumulador {
+        float minX = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        float minZ = Float.MAX_VALUE;
+        float maxZ = -Float.MAX_VALUE;
+
+        void expandir(float x, float y, float z) {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+            minZ = Math.min(minZ, z);
+            maxZ = Math.max(maxZ, z);
+        }
+    }
+
+    /**
+     * Subdivide un nodo cuya bounding box completa fue descartada por "degenerada" (spansWholeFootprint)
+     * en varios colliders mas pequenos, derivados de sus triangulos reales en vez de su unica
+     * bounding box. Una sola caja no puede representar una malla hueca/compleja (paredes con
+     * huecos de puerta) sin bloquear los huecos tambien -- rasterizar cada triangulo real contra
+     * una grilla XZ preserva los huecos (celdas sin triangulos = sin collider = pasable) mientras
+     * recupera colision solida donde realmente hay pared.
+     */
+    private void subdivideNode(Node node, Matrix4 instanceTransform, CollisionWorld collisionWorld,
+            Array<BoundingBox> puertaZonas) {
+        Matrix4 nodeWorldTransform = new Matrix4(instanceTransform).mul(node.globalTransform);
+        LongMap<CeldaAcumulador> celdas = new LongMap<>();
+
+        Vector3 v0 = new Vector3();
+        Vector3 v1 = new Vector3();
+        Vector3 v2 = new Vector3();
+
+        for (NodePart part : node.parts) {
+            MeshPart meshPart = part.meshPart;
+            Mesh mesh = meshPart.mesh;
+            VertexAttribute posAttr = mesh.getVertexAttribute(VertexAttributes.Usage.Position);
+            if (posAttr == null) {
+                continue;
+            }
+            int vertexSizeFloats = mesh.getVertexSize() / 4;
+            int posOffsetFloats = posAttr.offset / 4;
+
+            float[] vertices = new float[mesh.getNumVertices() * vertexSizeFloats];
+            mesh.getVertices(vertices);
+
+            short[] indices = new short[meshPart.size];
+            mesh.getIndices(meshPart.offset, meshPart.size, indices, 0);
+
+            for (int i = 0; i + 2 < indices.length; i += 3) {
+                leerVertice(vertices, indices[i], vertexSizeFloats, posOffsetFloats, v0).mul(nodeWorldTransform);
+                leerVertice(vertices, indices[i + 1], vertexSizeFloats, posOffsetFloats, v1).mul(nodeWorldTransform);
+                leerVertice(vertices, indices[i + 2], vertexSizeFloats, posOffsetFloats, v2).mul(nodeWorldTransform);
+                rasterizarTriangulo(v0, v1, v2, celdas);
+            }
+        }
+
+        for (LongMap.Entry<CeldaAcumulador> entry : celdas.entries()) {
+            CeldaAcumulador c = entry.value;
+            float dimX = c.maxX - c.minX;
+            float dimY = c.maxY - c.minY;
+            float dimZ = c.maxZ - c.minZ;
+            if (dimX < WALL_CELL_MIN_DIMENSION && dimY < WALL_CELL_MIN_DIMENSION && dimZ < WALL_CELL_MIN_DIMENSION) {
+                continue;
+            }
+            BoundingBox celdaBox = new BoundingBox(
+                    new Vector3(c.minX, c.minY, c.minZ), new Vector3(c.maxX, c.maxY, c.maxZ));
+            if (dentroDeZonaPuerta(celdaBox, puertaZonas)) {
+                continue;
+            }
+            collisionWorld.addStaticCollider(celdaBox);
+        }
+    }
+
+    private Vector3 leerVertice(float[] vertices, short indice, int vertexSizeFloats, int posOffsetFloats, Vector3 out) {
+        int base = indice * vertexSizeFloats + posOffsetFloats;
+        return out.set(vertices[base], vertices[base + 1], vertices[base + 2]);
+    }
+
+    /**
+     * Marca como ocupadas todas las celdas de la grilla XZ que se solapan con la bounding box XZ
+     * del triangulo (aproximacion conservadora: no rasteriza el triangulo exacto dentro de cada
+     * celda, solo su huella rectangular -- preferible errar hacia "un poco mas solido" que hacia
+     * "un hueco donde no deberia haberlo").
+     */
+    private void rasterizarTriangulo(Vector3 v0, Vector3 v1, Vector3 v2, LongMap<CeldaAcumulador> celdas) {
+        float minX = Math.min(v0.x, Math.min(v1.x, v2.x));
+        float maxX = Math.max(v0.x, Math.max(v1.x, v2.x));
+        float minZ = Math.min(v0.z, Math.min(v1.z, v2.z));
+        float maxZ = Math.max(v0.z, Math.max(v1.z, v2.z));
+        float minY = Math.min(v0.y, Math.min(v1.y, v2.y));
+        float maxY = Math.max(v0.y, Math.max(v1.y, v2.y));
+
+        int ixMin = (int) Math.floor(minX / WALL_GRID_CELL_SIZE);
+        int ixMax = (int) Math.floor(maxX / WALL_GRID_CELL_SIZE);
+        int izMin = (int) Math.floor(minZ / WALL_GRID_CELL_SIZE);
+        int izMax = (int) Math.floor(maxZ / WALL_GRID_CELL_SIZE);
+
+        for (int ix = ixMin; ix <= ixMax; ix++) {
+            float celdaMinX = ix * WALL_GRID_CELL_SIZE;
+            float celdaMaxX = celdaMinX + WALL_GRID_CELL_SIZE;
+            float xRecortadoMin = Math.max(minX, celdaMinX);
+            float xRecortadoMax = Math.min(maxX, celdaMaxX);
+            for (int iz = izMin; iz <= izMax; iz++) {
+                float celdaMinZ = iz * WALL_GRID_CELL_SIZE;
+                float celdaMaxZ = celdaMinZ + WALL_GRID_CELL_SIZE;
+                float zRecortadoMin = Math.max(minZ, celdaMinZ);
+                float zRecortadoMax = Math.min(maxZ, celdaMaxZ);
+
+                long clave = claveDeCelda(ix, iz);
+                CeldaAcumulador acumulador = celdas.get(clave);
+                if (acumulador == null) {
+                    acumulador = new CeldaAcumulador();
+                    celdas.put(clave, acumulador);
+                }
+                acumulador.expandir(xRecortadoMin, minY, zRecortadoMin);
+                acumulador.expandir(xRecortadoMax, maxY, zRecortadoMax);
+            }
+        }
+    }
+
+    /** Offset grande para mantener ambos indices no-negativos antes de combinarlos en una sola clave. */
+    private static final int CELDA_OFFSET = 100000;
+
+    private long claveDeCelda(int ix, int iz) {
+        return ((long) (ix + CELDA_OFFSET) << 32) | (long) (iz + CELDA_OFFSET);
+    }
+
+    /**
+     * True si este nodo o alguno de sus ancestros esta nombrado "puerta ..." en el modelo
+     * original (p.ej. "puerta Izquierda_56", el padre real de Object_97 -- confirmado leyendo la
+     * jerarquia real del glTF). Las hojas de puerta de la oficina vienen modeladas cerradas y
+     * solidas -- sin este filtro, ahora que existe colision de pared interior real (ver
+     * subdivideNode), el jugador queda sellado dentro de la oficina sin ninguna salida posible,
+     * ya que no existe ningun mecanismo de apertura/cierre de puertas en este MVP. Se trata la
+     * puerta como permanentemente abierta/pasable en vez de agregar una mecanica interactiva
+     * completa (fuera de alcance de esta correccion).
+     */
+    private boolean esParteDePuerta(Node node) {
+        Node actual = node;
+        while (actual != null) {
+            if (actual.id != null && actual.id.toLowerCase().contains("puerta")) {
+                return true;
+            }
+            actual = actual.getParent();
+        }
+        return false;
+    }
+
     private void addNodeAndChildren(Node node, Matrix4 instanceTransform, Vector3 mapDims,
-            CollisionWorld collisionWorld) {
+            CollisionWorld collisionWorld, Array<BoundingBox> puertaZonas) {
         if (node.parts.size > 0) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
@@ -134,13 +379,16 @@ public class LevelLoader {
                         && dims.z < COLLIDER_MIN_DIMENSION;
                 boolean spansWholeFootprint = dims.x >= mapDims.x * DEGENERATE_FOOTPRINT_FRACTION
                         && dims.z >= mapDims.z * DEGENERATE_FOOTPRINT_FRACTION;
-                if (!tooSmall && !spansWholeFootprint) {
+                boolean enZonaPuerta = dentroDeZonaPuerta(nodeBox, puertaZonas);
+                if (!tooSmall && !spansWholeFootprint && !enZonaPuerta) {
                     collisionWorld.addStaticCollider(nodeBox);
+                } else if (spansWholeFootprint && dims.y >= WALL_MIN_HEIGHT) {
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
                 }
             }
         }
         for (Node child : node.getChildren()) {
-            addNodeAndChildren(child, instanceTransform, mapDims, collisionWorld);
+            addNodeAndChildren(child, instanceTransform, mapDims, collisionWorld, puertaZonas);
         }
     }
 }
