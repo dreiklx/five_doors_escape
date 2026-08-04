@@ -8,8 +8,9 @@ import com.fivedoorsescape.ecs.components.AIComponent;
 import com.fivedoorsescape.ecs.components.AnimationComponent;
 
 /**
- * Freddy alcanzo al jugador. Se detiene el movimiento y se marca jugadorAtrapado=true;
- * GameplayScreen consulta ese flag cada frame para transicionar a NightGameOverScreen (MVP #9).
+ * Un guardia alcanzo al jugador. Se detiene el movimiento y se marca jugadorAtrapado=true;
+ * GameplayScreen consulta ese flag cada frame para disparar el jumpscare, y desde ahi decide
+ * si el jugador reaparece (si le quedan vidas) o transiciona a NightGameOverScreen.
  */
 public class CaughtState implements State<Entity> {
 

@@ -143,12 +143,13 @@ public class LevelLoader {
     }
 
     /**
-     * Recorre el arbol buscando nodos cuyo ancestro sea una puerta real (ver esParteDePuerta) y
-     * guarda su huella X/Z (expandida por DOOR_CLEARANCE_MARGIN) para despejarla de colision mas
-     * adelante -- tanto de si misma como de cualquier celda de pared subdividida que la cubra.
+     * Recorre el arbol buscando nodos cuyo ancestro sea una puerta o cortina real (ver
+     * esParteDePuertaOCortina) y guarda su huella X/Z (expandida por DOOR_CLEARANCE_MARGIN) para
+     * despejarla de colision mas adelante -- tanto de si misma como de cualquier celda de pared
+     * subdividida que la cubra.
      */
     private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out) {
-        if (node.parts.size > 0 && esParteDePuerta(node)) {
+        if (node.parts.size > 0 && esParteDePuertaOCortina(node)) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
             if (nodeBox.isValid()) {
@@ -355,12 +356,31 @@ public class LevelLoader {
      * ya que no existe ningun mecanismo de apertura/cierre de puertas en este MVP. Se trata la
      * puerta como permanentemente abierta/pasable en vez de agregar una mecanica interactiva
      * completa (fuera de alcance de esta correccion).
+     *
+     * Tambien incluye "CORTINA" (nodo real "CORTINA_37", material "cortina" en el .blend original
+     * -- confirmado que este mapa SI tiene una Pirate Cove real: base_39 usa el material literal
+     * "pirateCove" y METAL_38 usa "aroPirateCove", el aro de la cortina). La cortina viene modelada
+     * como una tela solida y cerrada, exactamente como en el lore real de FNAF (Foxy detras de una
+     * cortina cerrada) -- funciona como una puerta mas para efectos de colision: sin este filtro,
+     * la cortina sella el hueco de la Pirate Cove para siempre, ya que tampoco hay una mecanica de
+     * abrir/cerrar cortinas en este MVP. Se trata como permanentemente corrida/pasable, igual que
+     * las puertas, para poder ubicar a Foxy realmente detras de ella.
+     *
+     * Tambien incluye "base_39" (la tarima/piso propio de la Pirate Cove, confirmado con el
+     * material "pirateCove" en sus 14 fragmentos hijos): es solo piso decorativo a nivel de suelo
+     * (~0.42 unidades de alto en el .blend original), no una pared -- sin este filtro, cada
+     * fragmento genera un collider solido que actua como un bordillo infranqueable alrededor de
+     * toda la Pirate Cove (esta colision no tiene logica de "subir un escalon"), sellando el
+     * acceso igual que lo hacia la cortina.
      */
-    private boolean esParteDePuerta(Node node) {
+    private boolean esParteDePuertaOCortina(Node node) {
         Node actual = node;
         while (actual != null) {
-            if (actual.id != null && actual.id.toLowerCase().contains("puerta")) {
-                return true;
+            if (actual.id != null) {
+                String idMinuscula = actual.id.toLowerCase();
+                if (idMinuscula.contains("puerta") || idMinuscula.contains("cortina") || idMinuscula.contains("base_39")) {
+                    return true;
+                }
             }
             actual = actual.getParent();
         }
