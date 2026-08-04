@@ -39,9 +39,11 @@ import com.fivedoorsescape.util.GifDecoder;
 import com.fivedoorsescape.world.CollisionWorld;
 import com.fivedoorsescape.world.LevelLoader;
 
+import net.mgsx.gltf.scene3d.attributes.FogAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRTextureAttribute;
 import net.mgsx.gltf.scene3d.lights.DirectionalLightEx;
+import net.mgsx.gltf.scene3d.lights.DirectionalShadowLight;
 import net.mgsx.gltf.scene3d.scene.Scene;
 import net.mgsx.gltf.scene3d.scene.SceneManager;
 import net.mgsx.gltf.scene3d.scene.SceneSkybox;
@@ -229,10 +231,15 @@ public class GameplayScreen implements Screen {
         }
         sceneManager.setCamera(camera);
 
-        DirectionalLightEx light = new DirectionalLightEx();
+        // Sombras direccionales reales (nativas de gdx-gltf, DirectionalShadowLight extiende
+        // DirectionalLightEx -- SceneManager.render() ya las detecta y renderiza automaticamente,
+        // sin cambios adicionales de shader). Viewport dimensionado sobre la huella jugable real
+        // de pizzeria.json (X en [-10.7, 7.0], Z en [-7.0, 10.0]), no un valor adivinado.
+        DirectionalShadowLight light = new DirectionalShadowLight(1024, 1024, 26f, 26f, 0f, 30f);
         light.direction.set(1f, -3f, 1f).nor();
         light.color.set(Color.WHITE);
         light.intensity = 3f;
+        light.setCenter(-1.5f, 1f, 1.5f);
         sceneManager.environment.add(light);
 
         IBLBuilder iblBuilder = IBLBuilder.createOutdoor(light);
@@ -242,10 +249,18 @@ public class GameplayScreen implements Screen {
         iblBuilder.dispose();
 
         brdfLUT = new Texture(Gdx.files.classpath("net/mgsx/gltf/shaders/brdfLUT.png"));
-        sceneManager.setAmbientLight(1f);
+        // Ambiente reducido de 1.0 a 0.35 (medido visualmente, ver CLAUDE.md): con luz ambiente al
+        // maximo las sombras nuevas practicamente no se notaban y la escena se veia plana. Este
+        // valor mantiene la visibilidad del jugador (no es un juego de sigilo con oscuridad total)
+        // pero deja contraste real entre luz y sombra.
+        sceneManager.setAmbientLight(0.35f);
         sceneManager.environment.set(new PBRTextureAttribute(PBRTextureAttribute.BRDFLUTTexture, brdfLUT));
         sceneManager.environment.set(PBRCubemapAttribute.createSpecularEnv(specularCubemap));
         sceneManager.environment.set(PBRCubemapAttribute.createDiffuseEnv(diffuseCubemap));
+        // Niebla sutil nativa de gdx-gltf, funde hacia el color de fondo (negro, ver glClearColor)
+        // a partir de los 9 unidades y totalmente opaca a los 22 -- cubre los pasillos mas largos
+        // del mapa sin ocultar nada dentro del alcance normal de juego.
+        sceneManager.environment.set(FogAttribute.createFog(9f, 22f, 2f));
 
         skybox = new SceneSkybox(environmentCubemap);
         sceneManager.setSkyBox(skybox);
