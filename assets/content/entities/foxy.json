@@ -3,6 +3,9 @@
     "modelPath": "models/Foxy.glb",
     "scale": 0.095,
     "rotationXDegrees": 0.0,
-    "animaciones": {},
+    "animaciones": {
+        "idle": "Foxy_Idle",
+        "walk": "Foxy_Walk"
+    },
     "aiControlled": true
 }

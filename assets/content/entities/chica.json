@@ -3,6 +3,9 @@
     "modelPath": "models/Chica.glb",
     "scale": 0.02289,
     "rotationXDegrees": 0.0,
-    "animaciones": {},
+    "animaciones": {
+        "idle": "Chica_Idle",
+        "walk": "Chica_Walk"
+    },
     "aiControlled": true
 }

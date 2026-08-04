@@ -38,14 +38,11 @@ public class RenderSyncSystem extends IteratingSystem {
         ModelComponent model = Mappers.model.get(entity);
 
         float vaivenY = 0f;
-        // Bonnie/Chica/Foxy no tienen animacion esqueletica real: sus rigs usan esqueletos
-        // completamente distintos entre si y respecto al de Freddy (huesos "bip_*" en Bonnie,
-        // convenciones propias en Chica/Foxy, ninguno con nomenclatura Mixamo), y el de Chica
-        // ademas tiene el skin roto de origen (solo 2/90 mallas realmente skinneadas, ver
-        // documentacion) -- retargetear Breathing Idle a cada uno por separado no es la solucion
-        // mas limpia dado que ya existe esta tecnica (jitter procedural) validada para el
-        // jumpscare. Se reutiliza aqui, en JUGANDO normal, para que no se vean congelados sin
-        // necesitar 3 sesiones mas de retargeting por un efecto puramente cosmetico.
+        // Los 4 animatronicos (Freddy, Bonnie, Chica, Foxy) tienen ahora Walking/Breathing Idle
+        // retargeteados individualmente (ver documentacion), asi que en la practica todas las
+        // entidades con AIComponent tambien tienen AnimationComponent y esta rama no se ejecuta.
+        // Se deja como respaldo defensivo por si se agrega en el futuro un animatronico sin
+        // animacion esqueletica propia, para que no quede congelado frente a la camara.
         if (Mappers.ai.has(entity) && !Mappers.animation.has(entity)) {
             float fase = transform.position.x * 0.7f + transform.position.z * 0.3f;
             vaivenY = AMPLITUD_RESPIRACION * MathUtils.sin(tiempoTranscurrido * VELOCIDAD_RESPIRACION + fase);

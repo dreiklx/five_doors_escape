@@ -3,6 +3,9 @@
     "modelPath": "models/Bonnie.glb",
     "scale": 0.01545,
     "rotationXDegrees": 0.0,
-    "animaciones": {},
+    "animaciones": {
+        "idle": "Bonnie_Idle",
+        "walk": "Bonnie_Walk"
+    },
     "aiControlled": true
 }
