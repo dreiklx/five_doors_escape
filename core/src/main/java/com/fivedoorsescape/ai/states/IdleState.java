@@ -33,6 +33,12 @@ public class IdleState implements State<Entity> {
         if (ai.objetivo == null) {
             return;
         }
+        // Freddy (enemigo principal, ver AIComponent.siempreEnPersecucion) nunca se queda quieto
+        // esperando a que el jugador entre en rango -- persigue desde el primer frame.
+        if (ai.siempreEnPersecucion) {
+            ai.stateMachine.changeState(ChaseState.INSTANCE);
+            return;
+        }
         TransformComponent propio = Mappers.transform.get(entity);
         TransformComponent delJugador = Mappers.transform.get(ai.objetivo);
         // Distancia horizontal (XZ) unicamente: la Y del jugador es su altura de ojos (~1.6) y

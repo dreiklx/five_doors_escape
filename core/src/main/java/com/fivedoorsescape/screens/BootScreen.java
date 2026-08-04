@@ -52,6 +52,7 @@ public class BootScreen implements Screen {
         // proyecto Swing en si -- Swing tampoco tiene sonido distinto por animatronico).
         assets.queueSound(GameplayScreen.SONIDO_JUMPSCARE);
         assets.queueSound(GameplayScreen.SONIDO_ESTATICA);
+        assets.queueSound(GameplayScreen.SONIDO_RISA_FREDDY);
     }
 
     @Override

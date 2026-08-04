@@ -78,6 +78,9 @@ public class GameplayScreen implements Screen {
      * que BootScreen las encole junto con los modelos, sin nombres de archivo duplicados. */
     public static final String SONIDO_JUMPSCARE = "sounds/jumpscare.wav";
     public static final String SONIDO_ESTATICA = "sounds/static.wav";
+    /** Risa de Freddy reutilizada de FiveDoorsAtFreddys (risa_freddy1.wav), reproducida una sola
+     * vez al aparecer "RUN" en la intro -- pedido explicito del usuario. */
+    public static final String SONIDO_RISA_FREDDY = "sounds/risa_freddy.wav";
 
     /** GIF de estatica real reutilizado de FiveDoorsAtFreddys (efecto de transicion generico, no
      * un recurso exclusivo de un personaje -- aprobado explicitamente por el usuario). Se
@@ -148,6 +151,8 @@ public class GameplayScreen implements Screen {
     private AIComponent guardiaQueAtrapo;
     private Sound sonidoJumpscare;
     private Sound sonidoEstatica;
+    private Sound sonidoRisaFreddy;
+    private boolean risaFreddyReproducida = false;
     private long idSonidoJumpscareActivo = -1;
     private long idSonidoEstaticaActivo = -1;
 
@@ -155,6 +160,9 @@ public class GameplayScreen implements Screen {
     private Array<Float> duracionesCuadroEstatica;
     private int indiceCuadroEstatica = 0;
     private float tiempoEnCuadroEstatica = 0f;
+
+    private Texture texturaCorazonLleno;
+    private Texture texturaCorazonVacio;
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -194,20 +202,23 @@ public class GameplayScreen implements Screen {
 
         int numBones = 1;
 
+        // Freddy es el enemigo principal (decision de diseno del usuario 2026-08-03): persigue al
+        // jugador de forma continua durante toda la partida (AIComponent.siempreEnPersecucion),
+        // sin esperar a entrar en rangoDeteccion como los demas.
         Vector3 freddyStart = new Vector3(mapDef.freddyStartX, 0f, mapDef.freddyStartZ);
-        numBones = Math.max(numBones, crearGuardia(factory, "freddy", freddyStart, "Freddy"));
+        numBones = Math.max(numBones, crearGuardia(factory, "freddy", freddyStart, "Freddy", true));
 
         // Bonnie/Chica/Foxy: guardias estaticos en un punto fijo (IdleState -- no patrullan, ver
         // decision de diseno del usuario). Reutilizan exactamente el mismo IdleState/ChaseState/
         // CaughtState generico que ya usaba Freddy -- ninguno es especifico de un personaje.
         Vector3 bonnieStart = new Vector3(mapDef.bonnieStartX, 0f, mapDef.bonnieStartZ);
-        numBones = Math.max(numBones, crearGuardia(factory, "bonnie", bonnieStart, "Bonnie"));
+        numBones = Math.max(numBones, crearGuardia(factory, "bonnie", bonnieStart, "Bonnie", false));
 
         Vector3 chicaStart = new Vector3(mapDef.chicaStartX, 0f, mapDef.chicaStartZ);
-        numBones = Math.max(numBones, crearGuardia(factory, "chica", chicaStart, "Chica"));
+        numBones = Math.max(numBones, crearGuardia(factory, "chica", chicaStart, "Chica", false));
 
         Vector3 foxyStart = new Vector3(mapDef.foxyStartX, 0f, mapDef.foxyStartZ);
-        numBones = Math.max(numBones, crearGuardia(factory, "foxy", foxyStart, "Foxy"));
+        numBones = Math.max(numBones, crearGuardia(factory, "foxy", foxyStart, "Foxy", false));
 
         sceneManager = new SceneManager(PBRShaderProvider.createDefault(numBones), PBRShaderProvider.createDefaultDepth(numBones));
         sceneManager.addScene(mapScene);
@@ -245,8 +256,12 @@ public class GameplayScreen implements Screen {
         uiFont.setColor(Color.WHITE);
         uiShapes = new ShapeRenderer();
 
+        texturaCorazonLleno = new Texture(Gdx.files.internal("textures/corazon_relleno.png"));
+        texturaCorazonVacio = new Texture(Gdx.files.internal("textures/corazon_vacio.png"));
+
         sonidoJumpscare = assets.getSound(SONIDO_JUMPSCARE);
         sonidoEstatica = assets.getSound(SONIDO_ESTATICA);
+        sonidoRisaFreddy = assets.getSound(SONIDO_RISA_FREDDY);
 
         // GIF real de estatica de FiveDoorsAtFreddys (efecto de transicion generico, aprobado
         // explicitamente por el usuario) decodificado una sola vez a Texture por cuadro -- se
@@ -354,6 +369,13 @@ public class GameplayScreen implements Screen {
         if (tiempoEnEstado >= DURACION_INTRO_CORAZONES) {
             estado = EstadoPartida.INTRO_RUN;
             tiempoEnEstado = 0f;
+            // Risa de Freddy al aparecer "RUN" -- una sola vez (pedido explicito del usuario), el
+            // flag evita que se repita si este estado se volviera a alcanzar en el futuro.
+            if (!risaFreddyReproducida) {
+                sonidoRisaFreddy.play();
+                risaFreddyReproducida = true;
+                Gdx.app.log("GameplayScreen", "Risa de Freddy reproducida (una sola vez) al mostrar RUN");
+            }
         }
     }
 
@@ -381,13 +403,11 @@ public class GameplayScreen implements Screen {
         guardiaQueAtrapo = culpable;
         idSonidoJumpscareActivo = sonidoJumpscare.play();
 
-        // El mapa se retira temporalmente de la escena mientras dura el jumpscare (misma tecnica
-        // ya validada en la Fase 6, §2.12: "aislar la escena de Freddy sacando temporalmente
-        // mapScene del SceneManager") -- sin esto, la camara tan cerca del personaje puede terminar
-        // mostrando muebles cercanos (mesas, sillas, decoraciones) en vez del propio animatronico,
-        // sobre todo cuando el guardia esta posicionado junto al comedor. Se vuelve a agregar en
-        // iniciarEstatica().
-        sceneManager.removeScene(mapScene);
+        // NO se retira mapScene de la escena (a diferencia de una version anterior de esta
+        // funcion): retirarlo dejaba al animatronico flotando contra el skybox vacio en vez de
+        // aparecer dentro del comedor real -- confirmado visualmente comparando una captura real
+        // del jumpscare con y sin el mapa presente. El encuadre cerrado (JUMPSCARE_DISTANCIA_BASE)
+        // ya evita que muebles cercanos invadan el cuadro sin necesidad de ocultar el mapa entero.
     }
 
     private void actualizarJumpscare(float dt) {
@@ -465,9 +485,6 @@ public class GameplayScreen implements Screen {
         indiceCuadroEstatica = 0;
         tiempoEnCuadroEstatica = 0f;
         idSonidoEstaticaActivo = sonidoEstatica.play();
-        // El mapa (retirado en iniciarJumpscare) se restaura aqui -- la estatica ya tapa toda la
-        // pantalla, pero conviene dejar la escena en su estado normal antes de reaparecer.
-        sceneManager.addScene(mapScene);
     }
 
     private void actualizarEstatica(float dt) {
@@ -546,14 +563,17 @@ public class GameplayScreen implements Screen {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
 
         float anchoTotal = (VIDAS_INICIALES - 1) * CORAZON_ESPACIADO;
-        float xInicial = Gdx.graphics.getWidth() / 2f - anchoTotal / 2f;
-        float y = Gdx.graphics.getHeight() / 2f;
+        float xInicial = Gdx.graphics.getWidth() / 2f - anchoTotal / 2f - CORAZON_TAMANO / 2f;
+        float y = Gdx.graphics.getHeight() / 2f - CORAZON_TAMANO / 2f;
 
-        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiBatch.begin();
         for (int i = 0; i < VIDAS_INICIALES; i++) {
-            dibujarCorazon(xInicial + i * CORAZON_ESPACIADO, y, CORAZON_TAMANO, i < vidas);
+            Texture sprite = i < vidas ? texturaCorazonLleno : texturaCorazonVacio;
+            uiBatch.draw(sprite, xInicial + i * CORAZON_ESPACIADO, y, CORAZON_TAMANO, CORAZON_TAMANO);
         }
+        uiBatch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
@@ -582,41 +602,6 @@ public class GameplayScreen implements Screen {
         uiBatch.begin();
         uiBatch.draw(textura, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         uiBatch.end();
-    }
-
-    /**
-     * Dibuja un corazon simple (2 circulos + 1 triangulo) -- lleno y rojo si la vida sigue
-     * disponible, solo contorno si ya se perdio. Procedural en vez de un glifo Unicode ♥/♡ porque
-     * la BitmapFont por defecto de libGDX (arial-15 embebida) no trae esos caracteres.
-     */
-    private void dibujarCorazon(float cx, float cy, float tamano, boolean lleno) {
-        float radioLobulo = tamano * 0.28f;
-        float offsetLobuloX = tamano * 0.26f;
-        float offsetLobuloY = tamano * 0.12f;
-        Vector3 puntaInferior = new Vector3(cx, cy - tamano * 0.55f, 0f);
-        Vector3 puntaIzquierda = new Vector3(cx - tamano * 0.5f, cy + offsetLobuloY, 0f);
-        Vector3 puntaDerecha = new Vector3(cx + tamano * 0.5f, cy + offsetLobuloY, 0f);
-
-        com.badlogic.gdx.graphics.Color color = lleno ? com.badlogic.gdx.graphics.Color.FIREBRICK
-                : com.badlogic.gdx.graphics.Color.LIGHT_GRAY;
-
-        if (lleno) {
-            uiShapes.begin(ShapeRenderer.ShapeType.Filled);
-            uiShapes.setColor(color);
-            uiShapes.circle(cx - offsetLobuloX, cy + offsetLobuloY, radioLobulo, 24);
-            uiShapes.circle(cx + offsetLobuloX, cy + offsetLobuloY, radioLobulo, 24);
-            uiShapes.triangle(puntaIzquierda.x, puntaIzquierda.y, puntaDerecha.x, puntaDerecha.y,
-                    puntaInferior.x, puntaInferior.y);
-            uiShapes.end();
-        } else {
-            uiShapes.begin(ShapeRenderer.ShapeType.Line);
-            uiShapes.setColor(color);
-            uiShapes.circle(cx - offsetLobuloX, cy + offsetLobuloY, radioLobulo, 24);
-            uiShapes.circle(cx + offsetLobuloX, cy + offsetLobuloY, radioLobulo, 24);
-            uiShapes.line(puntaIzquierda.x, puntaIzquierda.y, puntaInferior.x, puntaInferior.y);
-            uiShapes.line(puntaDerecha.x, puntaDerecha.y, puntaInferior.x, puntaInferior.y);
-            uiShapes.end();
-        }
     }
 
     /**
@@ -666,11 +651,13 @@ public class GameplayScreen implements Screen {
      * para el chequeo de atrapada y devuelve el maxBones de su modelo (para dimensionar el
      * shader compartido de SceneManager al hueso mas exigente entre todos los personajes).
      */
-    private int crearGuardia(EntityFactory factory, String entityId, Vector3 posicion, String nombreParaLog) {
+    private int crearGuardia(EntityFactory factory, String entityId, Vector3 posicion, String nombreParaLog,
+            boolean persigueSiempre) {
         Entity entidad = factory.createEntity(entityId, posicion, 0f);
         AIComponent ai = Mappers.ai.get(entidad);
         ai.objetivo = playerEntity;
         ai.collisionWorld = collisionWorld;
+        ai.siempreEnPersecucion = persigueSiempre;
         guardias.add(ai);
         guardiaSpawns.add(new Vector3(posicion));
 
@@ -723,6 +710,8 @@ public class GameplayScreen implements Screen {
         for (Texture cuadro : cuadrosEstatica) {
             cuadro.dispose();
         }
+        texturaCorazonLleno.dispose();
+        texturaCorazonVacio.dispose();
         assets.dispose();
     }
 }

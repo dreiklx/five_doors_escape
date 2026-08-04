@@ -68,7 +68,9 @@ public class ChaseState implements State<Entity> {
             ai.stateMachine.changeState(CaughtState.INSTANCE);
             return;
         }
-        if (distancia > ai.rangoDeteccion * 1.5f) {
+        // Freddy (siempreEnPersecucion=true) nunca pierde el rastro por distancia -- los guardias
+        // estaticos si, para volver a IdleState cuando el jugador se aleja lo suficiente.
+        if (!ai.siempreEnPersecucion && distancia > ai.rangoDeteccion * 1.5f) {
             ai.stateMachine.changeState(IdleState.INSTANCE);
             return;
         }
