@@ -10,6 +10,7 @@ import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -209,9 +210,10 @@ public class GameplayScreen implements Screen {
     // Histeresis (unidades) alrededor de LATIDO_DISTANCIA_CERCA para decidir normal<->rapido, para
     // que el latido no parpadee entre ambos clips si el jugador se queda justo en el borde.
     private static final float LATIDO_HISTERESIS = 0.5f;
-    // Incrementado de 0.6 a 0.75 (pedido explicito del usuario 2026-08-04: "un poco mas oscura",
-    // sin cambiar el comportamiento/logica existente -- ver actualizarLatidosYVineta).
-    private static final float VINETA_ALPHA_MAXIMA = 0.75f;
+    // Incrementado de 0.6 a 0.75 (2026-08-04) y luego a 0.82 (2026-08-05, pedido explicito del
+    // usuario: "un poco mas oscura", sin cambiar el comportamiento/logica existente -- ver
+    // actualizarLatidosYVineta).
+    private static final float VINETA_ALPHA_MAXIMA = 0.82f;
     private static final float LATIDO_VOLUMEN_MINIMO = 0.25f;
 
     private enum EstadoLatido { SILENCIO, NORMAL, RAPIDO }
@@ -313,7 +315,16 @@ public class GameplayScreen implements Screen {
         luzDireccional.setCenter(-1.5f, 1f, 1.5f);
         sceneManager.environment.add(luzDireccional);
 
-        IBLBuilder iblBuilder = IBLBuilder.createOutdoor(luzDireccional);
+        // createIndoor (no createOutdoor) -- pedido explicito del usuario 2026-08-05: seguir
+        // mejorando el apartado visual investigando opciones razonables de gdx-gltf. createOutdoor
+        // genera un gradiente de "cielo diurno" brillante (colores casi blancos/celestes) que, aun
+        // sin ser visible directamente (no hay skybox propio en un mapa techado), SI se usa para
+        // las reflexiones/iluminacion ambiental especular de los materiales PBR (metal de los
+        // animatronicos, superficies brillantes) -- entonces contradice la ambientacion nocturna
+        // oscura ya establecida, aportando reflejos irrealmente brillantes. createIndoor genera un
+        // ambiente calido y tenue mucho mas coherente con la escena (pizzeria cerrada, de noche,
+        // iluminada solo por luz de luna fria + la linterna del jugador).
+        IBLBuilder iblBuilder = IBLBuilder.createIndoor(luzDireccional);
         environmentCubemap = iblBuilder.buildEnvMap(1024);
         diffuseCubemap = iblBuilder.buildIrradianceMap(256);
         specularCubemap = iblBuilder.buildRadianceMap(10);
@@ -329,10 +340,15 @@ public class GameplayScreen implements Screen {
         sceneManager.environment.set(new PBRTextureAttribute(PBRTextureAttribute.BRDFLUTTexture, brdfLUT));
         sceneManager.environment.set(PBRCubemapAttribute.createSpecularEnv(specularCubemap));
         sceneManager.environment.set(PBRCubemapAttribute.createDiffuseEnv(diffuseCubemap));
-        // Niebla sutil nativa de gdx-gltf, funde hacia el color de fondo (negro, ver glClearColor)
-        // a partir de los 9 unidades y totalmente opaca a los 22 -- cubre los pasillos mas largos
-        // del mapa sin ocultar nada dentro del alcance normal de juego.
+        // Niebla sutil nativa de gdx-gltf, a partir de los 9 unidades y totalmente opaca a los 22
+        // -- cubre los pasillos mas largos del mapa sin ocultar nada dentro del alcance normal de
+        // juego. El color hacia el que funde (ColorAttribute.Fog, uniform u_fogColor leido por el
+        // shader PBR de gdx-gltf) se deja igual de oscuro que antes pero con el mismo tinte azulado
+        // frio de la luz direccional en vez del negro puro por defecto -- pedido explicito del
+        // usuario 2026-08-05 de una niebla "mas cinematografica": que se sienta parte de la misma
+        // atmosfera de luz de luna en vez de un simple "desvanecido a negro" generico.
         sceneManager.environment.set(FogAttribute.createFog(9f, 22f, 2f));
+        sceneManager.environment.set(ColorAttribute.createFog(new Color(0.02f, 0.025f, 0.04f, 1f)));
 
         // Linterna del jugador (pedido explicito del usuario 2026-08-04): SpotLightEx nativo de
         // gdx-gltf (no un PointLight omnidireccional -- un cono real dirigido se siente mucho mas
@@ -643,10 +659,21 @@ public class GameplayScreen implements Screen {
      * depender de que el camino ENTRE tomas distintas este libre. */
     private void construirRutaCinematicaInicial() {
         float alturaMirada = 1.3f;
-        Vector3 foxyPos = new Vector3(-10f, 1.7f, -2f);
-        Vector3 bonniePosInicio = new Vector3(-7.5f, 1.7f, 4.5f);
-        Vector3 bonniePosFin = new Vector3(-7.5f, 1.7f, 5f);
-        Vector3 chicaPos = new Vector3(6f, 1.7f, -1f);
+        // Reencuadre pedido por el usuario 2026-08-05: los 4 animatronicos comparten la MISMA
+        // direccion de "frente" en espacio de mundo (yaw=0 para los 4, sin rotacion propia por
+        // personaje) -- confirmado empiricamente comparando, para Freddy (cuya toma ya mostraba
+        // su frente y no se toco), el vector camara->personaje contra el mismo vector en los otros
+        // 3 (que mostraban su espalda): en los 4 casos ese vector apunta aproximadamente hacia
+        // (-X,+Z). Freddy se veia bien de pura coincidencia de en que lado quedo su camara; Foxy/
+        // Bonnie/Chica quedaron del lado opuesto. Sin poder (ni deber) rotar a los personajes --
+        // su pose/animacion ya fue calibrada en rondas anteriores -- la correccion es reposicionar
+        // la camara de cada uno al lado (-X,+Z) de su spawn, igual que
+        // ya pasaba con Freddy, para que se vean "esperando" en vez de dandole la espalda al
+        // jugador. Verificado libre de colision (posicion + trayecto a la mirada) con capturas
+        // reales antes de fijar estos valores.
+        Vector3 foxyPos = new Vector3(-9.5f, 1.7f, 0.4f);
+        Vector3 bonniePos = new Vector3(-8.5f, 1.7f, 7.3f);
+        Vector3 chicaPos = new Vector3(4f, 1.7f, 3f);
         Vector3 freddyPos = new Vector3(6f, 1.7f, -2f);
         Vector3 finalPos = new Vector3(mapDef.playerStartX, 1.7f, mapDef.playerStartZ - 1f);
 
@@ -667,17 +694,16 @@ public class GameplayScreen implements Screen {
         }
 
         tomaPosInicio = new Vector3[] {
-                foxyPos, bonniePosInicio, chicaPos, freddyPos, finalPos,
+                foxyPos, bonniePos, chicaPos, freddyPos, finalPos,
         };
         tomaPosFin = new Vector3[] {
-                foxyPos, bonniePosFin, chicaPos, freddyPos, finalPos,
+                foxyPos, bonniePos, chicaPos, freddyPos, finalPos,
         };
-        // El objetivo arranca ligeramente desviado del animatronico (la camara "lo encuentra"
-        // girando un poco durante la toma) salvo en Bonnie, donde en cambio es la posicion la que
-        // avanza levemente (efecto de acercamiento) con el objetivo ya fijo sobre ella.
+        // El objetivo arranca ligeramente desviado del animatronico -- la camara "lo encuentra"
+        // girando un poco durante la toma, en vez de arrancar ya centrado en el.
         tomaObjInicio = new Vector3[] {
-                new Vector3(foxyObj).add(0.8f, 0f, -0.6f),
-                bonnieObj,
+                new Vector3(foxyObj).add(0.7f, 0f, 0.6f),
+                new Vector3(bonnieObj).add(-0.8f, 0f, 0.9f),
                 new Vector3(chicaObj).add(-0.9f, 0f, 0.7f),
                 new Vector3(freddyObj).add(0.7f, 0f, 0.9f),
                 new Vector3(finalObj).add(1.2f, 0f, 0f),

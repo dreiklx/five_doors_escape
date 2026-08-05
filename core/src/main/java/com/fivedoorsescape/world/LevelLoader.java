@@ -150,13 +150,16 @@ public class LevelLoader {
 
         Array<BoundingBox> puertaZonas = new Array<>();
         Array<BoundingBox> zonasCortinaSoloJugador = new Array<>();
+        Array<BoundingBox> pisosDecorativosSinColision = new Array<>();
         Array<Node> nodes = mapScene.modelInstance.nodes;
         for (Node node : nodes) {
-            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas, zonasCortinaSoloJugador, exitX, exitZ);
+            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas, zonasCortinaSoloJugador,
+                    pisosDecorativosSinColision, exitX, exitZ);
         }
 
         for (Node node : nodes) {
-            addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld, puertaZonas);
+            addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld, puertaZonas,
+                    pisosDecorativosSinColision);
         }
 
         // Pirate Cove (pedido explicito del usuario 2026-08-04): la cortina sigue pasable para
@@ -179,9 +182,30 @@ public class LevelLoader {
      * subdividida que la cubra. Los nodos de cortina (Pirate Cove) ademas se registran por
      * separado en zonasCortinaSoloJugador, sin la expansion "de paso libre" (aqui el proposito es
      * bloquear, no despejar), para bloquear unicamente al jugador.
+     *
+     * Los fragmentos de "base_39" (tarima decorativa de Pirate Cove, ver esPisoDecorativoPirateCove)
+     * se recogen aparte, en pisosDecorativosSinColision -- NO en out/puertaZonas. Bug real
+     * encontrado jugando (sesion 2026-08-05): out/puertaZonas se usa tambien en subdivideNode para
+     * despejar celdas de pared subdividida cercanas (ignorando Y a proposito, valido para huecos
+     * reales de puerta/cortina de piso a techo). Los 14 fragmentos de base_39 son solo piso
+     * (~0.42 de alto) pero su huella X/Z combinada cubre casi todo el interior de Pirate Cove --
+     * al estar en la misma lista que las puertas reales, tambien despejaba (sin querer) celdas de
+     * PARED real de altura completa cuya huella X/Z coincidia con la del piso, dejando un hueco
+     * atravesable en una pared que nunca debio perder su colision. Mantener esta lista separada
+     * (solo se usa para que el propio fragmento de piso no se convierta en collider, ver
+     * addNodeAndChildren) corrige esto sin tocar el comportamiento real de puertas/cortinas.
      */
     private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out,
-            Array<BoundingBox> zonasCortinaSoloJugador, float exitX, float exitZ) {
+            Array<BoundingBox> zonasCortinaSoloJugador, Array<BoundingBox> pisosDecorativosSinColision,
+            float exitX, float exitZ) {
+        if (node.parts.size > 0 && esPisoDecorativoPirateCove(node)) {
+            BoundingBox pisoBox = new BoundingBox();
+            node.calculateBoundingBox(pisoBox, true);
+            if (pisoBox.isValid()) {
+                pisoBox.mul(instanceTransform);
+                pisosDecorativosSinColision.add(pisoBox);
+            }
+        }
         if (node.parts.size > 0 && esParteDePuertaOCortina(node)) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
@@ -212,7 +236,8 @@ public class LevelLoader {
             }
         }
         for (Node child : node.getChildren()) {
-            collectDoorZones(child, instanceTransform, out, zonasCortinaSoloJugador, exitX, exitZ);
+            collectDoorZones(child, instanceTransform, out, zonasCortinaSoloJugador, pisosDecorativosSinColision,
+                    exitX, exitZ);
         }
     }
 
@@ -428,20 +453,13 @@ public class LevelLoader {
      * la cortina sella el hueco de la Pirate Cove para siempre, ya que tampoco hay una mecanica de
      * abrir/cerrar cortinas en este MVP. Se trata como permanentemente corrida/pasable, igual que
      * las puertas, para poder ubicar a Foxy realmente detras de ella.
-     *
-     * Tambien incluye "base_39" (la tarima/piso propio de la Pirate Cove, confirmado con el
-     * material "pirateCove" en sus 14 fragmentos hijos): es solo piso decorativo a nivel de suelo
-     * (~0.42 unidades de alto en el .blend original), no una pared -- sin este filtro, cada
-     * fragmento genera un collider solido que actua como un bordillo infranqueable alrededor de
-     * toda la Pirate Cove (esta colision no tiene logica de "subir un escalon"), sellando el
-     * acceso igual que lo hacia la cortina.
      */
     private boolean esParteDePuertaOCortina(Node node) {
         Node actual = node;
         while (actual != null) {
             if (actual.id != null) {
                 String idMinuscula = actual.id.toLowerCase();
-                if (idMinuscula.contains("puerta") || idMinuscula.contains("cortina") || idMinuscula.contains("base_39")) {
+                if (idMinuscula.contains("puerta") || idMinuscula.contains("cortina")) {
                     return true;
                 }
             }
@@ -450,8 +468,34 @@ public class LevelLoader {
         return false;
     }
 
+    /**
+     * True si este nodo o alguno de sus ancestros es "base_39" (la tarima/piso propio de la
+     * Pirate Cove, confirmado con el material "pirateCove" en sus 14 fragmentos hijos): es solo
+     * piso decorativo a nivel de suelo (~0.42 unidades de alto en el .blend original), no una
+     * pared -- sin excluirlo, cada fragmento genera un collider solido que actua como un bordillo
+     * infranqueable alrededor de toda la Pirate Cove (esta colision no tiene logica de "subir un
+     * escalon"), sellando el acceso igual que lo hacia la cortina.
+     *
+     * A proposito NO se trata igual que esParteDePuertaOCortina (ver collectDoorZones): sus
+     * fragmentos se recogen en una lista SEPARADA (pisosDecorativosSinColision) que solo se usa
+     * para que el propio fragmento de piso no se convierta en collider, nunca para despejar
+     * celdas de pared subdividida cercanas -- bug real encontrado jugando (sesion 2026-08-05) al
+     * estar mezclado con las zonas de puerta/cortina reales.
+     */
+    private boolean esPisoDecorativoPirateCove(Node node) {
+        Node actual = node;
+        while (actual != null) {
+            if (actual.id != null && actual.id.toLowerCase().contains("base_39")) {
+                return true;
+            }
+            actual = actual.getParent();
+        }
+        return false;
+    }
+
     private void addNodeAndChildren(Node node, Matrix4 instanceTransform, Vector3 mapDims,
-            CollisionWorld collisionWorld, Array<BoundingBox> puertaZonas) {
+            CollisionWorld collisionWorld, Array<BoundingBox> puertaZonas,
+            Array<BoundingBox> pisosDecorativosSinColision) {
         if (node.parts.size > 0) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
@@ -462,16 +506,20 @@ public class LevelLoader {
                         && dims.z < COLLIDER_MIN_DIMENSION;
                 boolean spansWholeFootprint = dims.x >= mapDims.x * DEGENERATE_FOOTPRINT_FRACTION
                         && dims.z >= mapDims.z * DEGENERATE_FOOTPRINT_FRACTION;
-                boolean enZonaPuerta = dentroDeZonaPuerta(nodeBox, puertaZonas);
+                boolean enZonaPuerta = dentroDeZonaPuerta(nodeBox, puertaZonas)
+                        || dentroDeZonaPuerta(nodeBox, pisosDecorativosSinColision);
                 if (!tooSmall && !spansWholeFootprint && !enZonaPuerta) {
                     collisionWorld.addStaticCollider(nodeBox);
                 } else if (spansWholeFootprint && dims.y >= WALL_MIN_HEIGHT) {
+                    // Solo puertaZonas (nunca pisosDecorativosSinColision) despeja celdas de
+                    // pared subdividida -- ver comentario de esPisoDecorativoPirateCove.
                     subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
                 }
             }
         }
         for (Node child : node.getChildren()) {
-            addNodeAndChildren(child, instanceTransform, mapDims, collisionWorld, puertaZonas);
+            addNodeAndChildren(child, instanceTransform, mapDims, collisionWorld, puertaZonas,
+                    pisosDecorativosSinColision);
         }
     }
 }
