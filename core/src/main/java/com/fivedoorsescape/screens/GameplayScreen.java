@@ -340,15 +340,23 @@ public class GameplayScreen implements Screen {
         sceneManager.environment.set(new PBRTextureAttribute(PBRTextureAttribute.BRDFLUTTexture, brdfLUT));
         sceneManager.environment.set(PBRCubemapAttribute.createSpecularEnv(specularCubemap));
         sceneManager.environment.set(PBRCubemapAttribute.createDiffuseEnv(diffuseCubemap));
-        // Niebla sutil nativa de gdx-gltf, a partir de los 9 unidades y totalmente opaca a los 22
-        // -- cubre los pasillos mas largos del mapa sin ocultar nada dentro del alcance normal de
-        // juego. El color hacia el que funde (ColorAttribute.Fog, uniform u_fogColor leido por el
-        // shader PBR de gdx-gltf) se deja igual de oscuro que antes pero con el mismo tinte azulado
-        // frio de la luz direccional en vez del negro puro por defecto -- pedido explicito del
-        // usuario 2026-08-05 de una niebla "mas cinematografica": que se sienta parte de la misma
-        // atmosfera de luz de luna en vez de un simple "desvanecido a negro" generico.
-        sceneManager.environment.set(FogAttribute.createFog(9f, 22f, 2f));
-        sceneManager.environment.set(ColorAttribute.createFog(new Color(0.02f, 0.025f, 0.04f, 1f)));
+        // Niebla nativa de gdx-gltf. Ajustada 2026-08-05 (pedido explicito del usuario: "casi no
+        // se percibe... quiero que contribuya un poco mas a la atmosfera, sin exagerar"). Dos
+        // cambios, no uno solo -- el primer intento (solo bajar near/far) seguia sin notarse en
+        // capturas reales, confirmando que el color era el limitante real, no la distancia:
+        // (1) near baja de 9 a 5 -- con near=9 la niebla practicamente nunca se notaba, porque la
+        // mayoria de los pasillos/habitaciones de este mapa (~18x17 de huella jugable) tienen
+        // sightlines mas cortas que eso; far tambien baja de 22 a 17 para alcanzar opacidad
+        // completa a una distancia mas realista dentro del mapa. (2) el color hacia el que funde
+        // (ColorAttribute.Fog) se aclara considerablemente, de (0.02,0.025,0.04) a
+        // (0.14,0.17,0.24) -- con el ambiente ya tan oscuro (AMBIENTE_JUGANDO=0.12), un color de
+        // niebla casi negro se fundia de forma invisible en la propia oscuridad de la escena sin
+        // importar la distancia (confirmado con una primera prueba intermedia, (0.05,0.06,0.09),
+        // que TAMPOCO se notaba en una captura real); este tono (siempre dentro del mismo tinte
+        // azulado frio de la luz direccional) sí se percibe como una neblina real sobre las
+        // paredes lejanas sin taparlas ni afectar nada dentro del alcance normal de la linterna.
+        sceneManager.environment.set(FogAttribute.createFog(5f, 17f, 2f));
+        sceneManager.environment.set(ColorAttribute.createFog(new Color(0.14f, 0.17f, 0.24f, 1f)));
 
         // Linterna del jugador (pedido explicito del usuario 2026-08-04): SpotLightEx nativo de
         // gdx-gltf (no un PointLight omnidireccional -- un cono real dirigido se siente mucho mas

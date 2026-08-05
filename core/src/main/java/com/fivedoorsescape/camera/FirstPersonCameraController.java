@@ -50,8 +50,12 @@ public class FirstPersonCameraController {
         float yawRad = yawDegrees * MathUtils.degreesToRadians;
         float dirX = MathUtils.sin(yawRad);
         float dirZ = MathUtils.cos(yawRad);
-        float rightX = dirZ;
-        float rightZ = -dirX;
+        // Vector "derecha" real respecto a la direccion de mirada -- invertido hasta ahora
+        // (bug real reportado por el usuario 2026-08-05: A movia a la derecha, D a la izquierda).
+        // El signo correcto es (-dirZ, dirX), no (dirZ, -dirX): verificado jugando, sin tocar el
+        // mouse-look (yaw) ni W/S, que ya funcionaban bien.
+        float rightX = -dirZ;
+        float rightZ = dirX;
 
         delta.x = dirX * forward + rightX * strafe;
         delta.z = dirZ * forward + rightZ * strafe;
