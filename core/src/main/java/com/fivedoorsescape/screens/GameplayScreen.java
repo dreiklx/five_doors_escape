@@ -38,6 +38,7 @@ import com.fivedoorsescape.ecs.systems.AnimationSystem;
 import com.fivedoorsescape.ecs.systems.RenderSyncSystem;
 import com.fivedoorsescape.io.HandoffData;
 import com.fivedoorsescape.util.GifDecoder;
+import com.fivedoorsescape.util.WavDuration;
 import com.fivedoorsescape.world.CollisionWorld;
 import com.fivedoorsescape.world.LevelLoader;
 
@@ -69,6 +70,12 @@ public class GameplayScreen implements Screen {
      */
     private static final float MAX_FRAME_DELTA = 0.1f;
 
+    /** Intensidad de la linterna cuando esta encendida (pedido explicito del usuario 2026-08-04:
+     * moderada, no exagerada). Apagada, su intensidad real pasa a 0 -- no ilumina nada, ver
+     * CTRL en el bucle JUGANDO mas abajo (pedido explicito del usuario 2026-08-05: poder
+     * apagarla con CTRL, con un clic de sonido al cambiar de estado). */
+    private static final float LINTERNA_INTENSIDAD_ENCENDIDA = 18f;
+
     // Boton discreto de salida manual (esquina superior izquierda, ver memoria de Claude
     // "project-libgdx-office-spawn-exit-design"): solo responde a clics cuando el cursor no
     // esta capturado (ESC libera el cursor, ver isKeyJustPressed(ESCAPE) mas abajo) -- con el
@@ -91,6 +98,26 @@ public class GameplayScreen implements Screen {
      * actualizarLatidosYVineta. */
     public static final String SONIDO_LATIDO_NORMAL = "sounds/latido_normal.wav";
     public static final String SONIDO_LATIDO_RAPIDO = "sounds/latido_rapido.wav";
+    /** Click de la linterna al encender/apagar (pedido explicito del usuario 2026-08-05, CTRL
+     * como tecla de alternancia). Reutiliza botones_menu.wav de FiveDoorsAtFreddys (mismo patron
+     * de reuso de assets ya establecido para risa_freddy/jumpscare/estatica) -- un clic corto
+     * generico encaja igual de bien como sonido de interruptor de linterna. */
+    public static final String SONIDO_LINTERNA_CLICK = "sounds/linterna_click.wav";
+
+    /** Narracion de la cinematica inicial del modo Escape, en los 2 idiomas soportados (pedido
+     * explicito del usuario 2026-08-05, mismos audios "Escape ES/EN" que el proyecto Swing usa
+     * para la llamada de la Noche 5). Solo se encola/carga el archivo del idioma real de
+     * handoff.idioma (ver rutaAudioEscape) -- nunca ambos, para no cargar audio que no se va a
+     * usar en esta sesion. */
+    public static final String SONIDO_ESCAPE_ES = "sounds/escape_es.wav";
+    public static final String SONIDO_ESCAPE_EN = "sounds/escape_en.wav";
+
+    /** Unico punto de resolucion idioma->archivo para la narracion de Escape -- BootScreen (al
+     * encolar) y GameplayScreen.show() (al reproducir) llaman a este mismo metodo, para que la
+     * logica de que archivo corresponde a que idioma exista en un solo lugar. */
+    public static String rutaAudioEscape(HandoffData.Idioma idioma) {
+        return idioma == HandoffData.Idioma.INGLES ? SONIDO_ESCAPE_EN : SONIDO_ESCAPE_ES;
+    }
 
     /** GIF de estatica real reutilizado de FiveDoorsAtFreddys (efecto de transicion generico, no
      * un recurso exclusivo de un personaje -- aprobado explicitamente por el usuario). Se
@@ -105,12 +132,20 @@ public class GameplayScreen implements Screen {
     private static final float DURACION_INTRO_RUN = 1.5f;
     private static final float DURACION_CORAZONES_RESPAWN = 2.5f;
 
+    /** Valor de respaldo si por algun motivo no se puede leer la duracion real del audio de la
+     * cinematica (ver WavDuration.leerSegundos) -- mismo patron de fallback que usa el lado
+     * Swing (Sonido.getDuracionMs() &lt;= 0). Nunca deberia usarse en la practica. */
+    private static final float DURACION_CINEMATICA_RESPALDO = 18f;
+
     /** Duracion de la cinematica inicial (pedido explicito del usuario 2026-08-04): recorrido de
      * camara lento mostrando a los 4 animatronicos, todos completamente inmoviles (durante este
      * estado nunca se llama engine.update(), asi que ni la IA ni las animaciones avanzan -- ver
-     * actualizarCinematicaInicial). El usuario grabara audio narrativo mas adelante para
-     * acompanarla; por ahora solo la temporizacion y el recorrido de camara quedan listos. */
-    private static final float DURACION_CINEMATICA_INICIAL = 17f;
+     * actualizarCinematicaInicial). Pedido explicito del usuario 2026-08-05: la cinematica ahora
+     * tiene narracion real (Escape ES/EN) y debe durar EXACTAMENTE lo mismo que ese audio -- por
+     * eso ya no es una constante fija, se calcula en show() leyendo la duracion real del WAV
+     * seleccionado (WavDuration.leerSegundos), para que se reajuste sola si el audio cambia en
+     * el futuro en vez de quedar desincronizada con un numero hardcodeado. */
+    private float duracionCinematicaInicial = DURACION_CINEMATICA_RESPALDO;
 
     /** Ambiente real de juego (oscuro y dramatico, ver setAmbientLight en show()) vs. ambiente
      * usado solo durante la cinematica inicial. Con el ambiente oscuro de JUGANDO, los 4
@@ -188,6 +223,11 @@ public class GameplayScreen implements Screen {
     private Sound sonidoEstatica;
     private Sound sonidoRisaFreddy;
     private boolean risaFreddyReproducida = false;
+    private Sound sonidoLinternaClick;
+    /** Estado real de la linterna (pedido explicito del usuario 2026-08-05: poder apagarla con
+     * CTRL). Empieza encendida -- comportamiento previo, ninguna regresion para quien no toque
+     * la tecla nueva. Ver actualizarLinternaJugador(). */
+    private boolean linternaEncendida = true;
     private long idSonidoJumpscareActivo = -1;
     private long idSonidoEstaticaActivo = -1;
 
@@ -223,6 +263,7 @@ public class GameplayScreen implements Screen {
     private EstadoLatido estadoLatidoActual = EstadoLatido.SILENCIO;
     private long idSonidoLatidoActivo = -1;
     private Texture texturaVineta;
+    private Sound sonidoEscape;
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -366,7 +407,7 @@ public class GameplayScreen implements Screen {
         // moderados (no "exagerada", pedido explicito) -- ver esa nota para los valores medidos.
         linternaJugador = new SpotLightEx();
         linternaJugador.setColor(1f, 0.96f, 0.85f, 1f);
-        linternaJugador.intensity = 18f;
+        linternaJugador.intensity = LINTERNA_INTENSIDAD_ENCENDIDA;
         linternaJugador.setConeDeg(28f, 14f);
         linternaJugador.range = 11f;
         sceneManager.environment.add(linternaJugador);
@@ -388,6 +429,7 @@ public class GameplayScreen implements Screen {
         sonidoRisaFreddy = assets.getSound(SONIDO_RISA_FREDDY);
         sonidoLatidoNormal = assets.getSound(SONIDO_LATIDO_NORMAL);
         sonidoLatidoRapido = assets.getSound(SONIDO_LATIDO_RAPIDO);
+        sonidoLinternaClick = assets.getSound(SONIDO_LINTERNA_CLICK);
         texturaVineta = crearTexturaVineta();
 
         // GIF real de estatica de FiveDoorsAtFreddys (efecto de transicion generico, aprobado
@@ -404,6 +446,15 @@ public class GameplayScreen implements Screen {
             duracionesCuadroEstatica.add(cuadro.duracionSegundos);
         }
         Gdx.app.log("GameplayScreen", "GIF de estatica decodificado: " + cuadrosEstatica.size + " cuadros");
+
+        // Narracion de la cinematica de Escape (pedido explicito del usuario 2026-08-05): se
+        // carga el audio del idioma real de esta sesion (ver rutaAudioEscape) y se mide su
+        // duracion REAL leyendo el propio archivo WAV (WavDuration) -- la cinematica completa
+        // (construirRutaCinematicaInicial, mas abajo) usa ese valor para que dure exactamente lo
+        // mismo que el audio, sin ningun numero de segundos hardcodeado.
+        String rutaEscape = rutaAudioEscape(handoff.idioma);
+        sonidoEscape = assets.getSound(rutaEscape);
+        duracionCinematicaInicial = WavDuration.leerSegundos(Gdx.files.internal(rutaEscape), DURACION_CINEMATICA_RESPALDO);
 
         construirRutaCinematicaInicial();
         posicionarModelosParaCinematica();
@@ -580,6 +631,11 @@ public class GameplayScreen implements Screen {
             Gdx.input.setCursorCatched(!Gdx.input.isCursorCatched());
         }
 
+        if (Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_RIGHT)) {
+            linternaEncendida = !linternaEncendida;
+            sonidoLinternaClick.play();
+        }
+
         cameraController.update();
 
         TransformComponent playerTransform = Mappers.transform.get(playerEntity);
@@ -594,6 +650,7 @@ public class GameplayScreen implements Screen {
         cameraController.applyToCamera(playerTransform.position);
         linternaJugador.position.set(camera.position);
         linternaJugador.direction.set(camera.direction);
+        linternaJugador.intensity = linternaEncendida ? LINTERNA_INTENSIDAD_ENCENDIDA : 0f;
 
         engine.update(dt);
 
@@ -638,8 +695,10 @@ public class GameplayScreen implements Screen {
     // ------------------------------------------------------------------
 
     /** Duracion de cada toma de la cinematica (5 tomas: Foxy, Bonnie, Chica, Freddy, retorno al
-     * inicio del jugador) y del breve fundido a negro en los cortes entre tomas. */
-    private static final float DURACION_TOMA = DURACION_CINEMATICA_INICIAL / 5f;
+     * inicio del jugador), derivada de duracionCinematicaInicial (ver esa nota) -- ya no es una
+     * constante fija, se recalcula en construirRutaCinematicaInicial() una vez conocida la
+     * duracion real del audio. Duracion del breve fundido a negro en los cortes entre tomas. */
+    private float duracionToma = DURACION_CINEMATICA_RESPALDO / 5f;
     private static final float DURACION_FUNDIDO_CORTE = 0.35f;
 
     private float[] tomaTiempoInicio;
@@ -666,6 +725,7 @@ public class GameplayScreen implements Screen {
      * hacia el objetivo) es la solucion robusta: cada toma es su propio segmento seguro, sin
      * depender de que el camino ENTRE tomas distintas este libre. */
     private void construirRutaCinematicaInicial() {
+        duracionToma = duracionCinematicaInicial / 5f;
         float alturaMirada = 1.3f;
         // Reencuadre pedido por el usuario 2026-08-05: los 4 animatronicos comparten la MISMA
         // direccion de "frente" en espacio de mundo (yaw=0 para los 4, sin rotacion propia por
@@ -697,8 +757,8 @@ public class GameplayScreen implements Screen {
         tomaTiempoInicio = new float[5];
         tomaTiempoFin = new float[5];
         for (int i = 0; i < 5; i++) {
-            tomaTiempoInicio[i] = i * DURACION_TOMA;
-            tomaTiempoFin[i] = (i + 1) * DURACION_TOMA;
+            tomaTiempoInicio[i] = i * duracionToma;
+            tomaTiempoFin[i] = (i + 1) * duracionToma;
         }
 
         tomaPosInicio = new Vector3[] {
@@ -728,11 +788,12 @@ public class GameplayScreen implements Screen {
         if (tiempoEnEstado == 0f) {
             sceneManager.setAmbientLight(AMBIENTE_CINEMATICA);
             luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_CINEMATICA;
+            sonidoEscape.play();
         }
         tiempoEnEstado += dt;
-        float t = Math.min(tiempoEnEstado, DURACION_CINEMATICA_INICIAL);
+        float t = Math.min(tiempoEnEstado, duracionCinematicaInicial);
 
-        int toma = Math.min((int) (t / DURACION_TOMA), tomaPosInicio.length - 1);
+        int toma = Math.min((int) (t / duracionToma), tomaPosInicio.length - 1);
         float tInicio = tomaTiempoInicio[toma];
         float tFin = tomaTiempoFin[toma];
         float progreso = tFin > tInicio ? MathUtils.clamp((t - tInicio) / (tFin - tInicio), 0f, 1f) : 1f;
@@ -775,7 +836,7 @@ public class GameplayScreen implements Screen {
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
 
-        if (tiempoEnEstado >= DURACION_CINEMATICA_INICIAL) {
+        if (tiempoEnEstado >= duracionCinematicaInicial) {
             sceneManager.setAmbientLight(AMBIENTE_JUGANDO);
             luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_JUGANDO;
             estado = EstadoPartida.INTRO_CORAZONES;
