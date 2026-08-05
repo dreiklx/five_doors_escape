@@ -149,13 +149,24 @@ public class LevelLoader {
         Vector3 mapDims = mapFootprint.getDimensions(new Vector3());
 
         Array<BoundingBox> puertaZonas = new Array<>();
+        Array<BoundingBox> zonasCortinaSoloJugador = new Array<>();
         Array<Node> nodes = mapScene.modelInstance.nodes;
         for (Node node : nodes) {
-            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas, exitX, exitZ);
+            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas, zonasCortinaSoloJugador, exitX, exitZ);
         }
 
         for (Node node : nodes) {
             addNodeAndChildren(node, mapScene.modelInstance.transform, mapDims, collisionWorld, puertaZonas);
+        }
+
+        // Pirate Cove (pedido explicito del usuario 2026-08-04): la cortina sigue pasable para
+        // Foxy/la IA (esta en puertaZonas como cualquier otra puerta, ver esParteDePuertaOCortina),
+        // pero ademas se agrega su huella como collider SOLO-JUGADOR -- CollisionWorld.
+        // resolveMovement(..., esJugador=true) (usado unicamente por el jugador en
+        // GameplayScreen) la respeta, mientras que el movimiento de los guardias (ChaseState,
+        // resolveMovement de 3 argumentos, esJugador=false implicito) la ignora por completo.
+        for (BoundingBox zona : zonasCortinaSoloJugador) {
+            collisionWorld.addColliderSoloJugador(zona);
         }
 
         addBoundaryWalls(mapFootprint, collisionWorld);
@@ -165,15 +176,27 @@ public class LevelLoader {
      * Recorre el arbol buscando nodos cuyo ancestro sea una puerta o cortina real (ver
      * esParteDePuertaOCortina) y guarda su huella X/Z (expandida por DOOR_CLEARANCE_MARGIN) para
      * despejarla de colision mas adelante -- tanto de si misma como de cualquier celda de pared
-     * subdividida que la cubra.
+     * subdividida que la cubra. Los nodos de cortina (Pirate Cove) ademas se registran por
+     * separado en zonasCortinaSoloJugador, sin la expansion "de paso libre" (aqui el proposito es
+     * bloquear, no despejar), para bloquear unicamente al jugador.
      */
     private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out,
-            float exitX, float exitZ) {
+            Array<BoundingBox> zonasCortinaSoloJugador, float exitX, float exitZ) {
         if (node.parts.size > 0 && esParteDePuertaOCortina(node)) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
             if (nodeBox.isValid()) {
                 nodeBox.mul(instanceTransform);
+
+                if (esParteDeCortina(node)) {
+                    BoundingBox zonaBloqueo = new BoundingBox(nodeBox);
+                    zonaBloqueo.min.x -= DOOR_CLEARANCE_MARGIN;
+                    zonaBloqueo.max.x += DOOR_CLEARANCE_MARGIN;
+                    zonaBloqueo.min.z -= DOOR_CLEARANCE_MARGIN;
+                    zonaBloqueo.max.z += DOOR_CLEARANCE_MARGIN;
+                    zonasCortinaSoloJugador.add(zonaBloqueo);
+                }
+
                 Vector3 centro = nodeBox.getCenter(new Vector3());
                 float dx = centro.x - exitX;
                 float dz = centro.z - exitZ;
@@ -189,8 +212,21 @@ public class LevelLoader {
             }
         }
         for (Node child : node.getChildren()) {
-            collectDoorZones(child, instanceTransform, out, exitX, exitZ);
+            collectDoorZones(child, instanceTransform, out, zonasCortinaSoloJugador, exitX, exitZ);
         }
+    }
+
+    /** True si este nodo o alguno de sus ancestros es especificamente la cortina de Pirate Cove
+     * ("CORTINA_37"), no cualquier puerta -- ver bloqueo solo-jugador en collectDoorZones. */
+    private boolean esParteDeCortina(Node node) {
+        Node actual = node;
+        while (actual != null) {
+            if (actual.id != null && actual.id.toLowerCase().contains("cortina")) {
+                return true;
+            }
+            actual = actual.getParent();
+        }
+        return false;
     }
 
     /**
