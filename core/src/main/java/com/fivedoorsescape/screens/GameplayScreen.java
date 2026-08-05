@@ -11,6 +11,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -83,6 +84,11 @@ public class GameplayScreen implements Screen {
     /** Risa de Freddy reutilizada de FiveDoorsAtFreddys (risa_freddy1.wav), reproducida una sola
      * vez al aparecer "RUN" en la intro -- pedido explicito del usuario. */
     public static final String SONIDO_RISA_FREDDY = "sounds/risa_freddy.wav";
+    /** Latidos de tension (pedido explicito del usuario 2026-08-04): dos clips en loop, uno normal
+     * y uno acelerado, elegidos segun la distancia real al animatronico mas cercano. Ver
+     * actualizarLatidosYVineta. */
+    public static final String SONIDO_LATIDO_NORMAL = "sounds/latido_normal.wav";
+    public static final String SONIDO_LATIDO_RAPIDO = "sounds/latido_rapido.wav";
 
     /** GIF de estatica real reutilizado de FiveDoorsAtFreddys (efecto de transicion generico, no
      * un recurso exclusivo de un personaje -- aprobado explicitamente por el usuario). Se
@@ -166,6 +172,28 @@ public class GameplayScreen implements Screen {
     private Texture texturaCorazonLleno;
     private Texture texturaCorazonVacio;
 
+    // Sistema de latidos de tension + vineta (pedido explicito del usuario 2026-08-04). Rangos
+    // medidos contra el tamano real de la pizzeria (huella jugable ~18x17 unidades, ver
+    // CLAUDE.md) y contra rangoDeteccion=8 de AIComponent, no valores arbitrarios: mas alla de
+    // DISTANCIA_LEJOS no hay ningun indicio sensorial (silencio total, sin vineta); por debajo de
+    // DISTANCIA_CERCA el latido pasa a la version acelerada. Un solo sistema global, calculado
+    // siempre contra el animatronico MAS CERCANO (nunca varios sonidos superpuestos).
+    private static final float LATIDO_DISTANCIA_LEJOS = 7.0f;
+    private static final float LATIDO_DISTANCIA_CERCA = 3.0f;
+    // Histeresis (unidades) alrededor de LATIDO_DISTANCIA_CERCA para decidir normal<->rapido, para
+    // que el latido no parpadee entre ambos clips si el jugador se queda justo en el borde.
+    private static final float LATIDO_HISTERESIS = 0.5f;
+    private static final float VINETA_ALPHA_MAXIMA = 0.6f;
+    private static final float LATIDO_VOLUMEN_MINIMO = 0.25f;
+
+    private enum EstadoLatido { SILENCIO, NORMAL, RAPIDO }
+
+    private Sound sonidoLatidoNormal;
+    private Sound sonidoLatidoRapido;
+    private EstadoLatido estadoLatidoActual = EstadoLatido.SILENCIO;
+    private long idSonidoLatidoActivo = -1;
+    private Texture texturaVineta;
+
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
         this.registry = registry;
@@ -180,12 +208,13 @@ public class GameplayScreen implements Screen {
         mapDef = registry.getMapDefinition("pizzeria");
         LevelLoader levelLoader = new LevelLoader(registry, assets);
         mapScene = levelLoader.loadMapScene("pizzeria");
-        levelLoader.buildStaticColliders(mapScene, collisionWorld);
-        Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
 
         exitX = mapDef.exitX;
         exitZ = mapDef.exitZ;
         exitRadius = mapDef.exitRadius;
+
+        levelLoader.buildStaticColliders(mapScene, collisionWorld, exitX, exitZ);
+        Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
 
         camera = new PerspectiveCamera(67f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.near = 0.05f;
@@ -277,6 +306,9 @@ public class GameplayScreen implements Screen {
         sonidoJumpscare = assets.getSound(SONIDO_JUMPSCARE);
         sonidoEstatica = assets.getSound(SONIDO_ESTATICA);
         sonidoRisaFreddy = assets.getSound(SONIDO_RISA_FREDDY);
+        sonidoLatidoNormal = assets.getSound(SONIDO_LATIDO_NORMAL);
+        sonidoLatidoRapido = assets.getSound(SONIDO_LATIDO_RAPIDO);
+        texturaVineta = crearTexturaVineta();
 
         // GIF real de estatica de FiveDoorsAtFreddys (efecto de transicion generico, aprobado
         // explicitamente por el usuario) decodificado una sola vez a Texture por cuadro -- se
@@ -301,6 +333,115 @@ public class GameplayScreen implements Screen {
             }
         }
         throw new IllegalStateException("No se encontro la entidad para el AIComponent dado");
+    }
+
+    /**
+     * Genera una vez la textura de vineta: gradiente radial, transparente en el centro y
+     * oscureciendose hacia las esquinas. Generada en codigo (Pixmap) en vez de pedir un archivo
+     * de imagen nuevo -- no depende de ningun asset externo.
+     */
+    private Texture crearTexturaVineta() {
+        int tam = 512;
+        Pixmap pixmap = new Pixmap(tam, tam, Pixmap.Format.RGBA8888);
+        float centro = tam / 2f;
+        float radioMax = (float) Math.sqrt(centro * centro + centro * centro);
+        for (int y = 0; y < tam; y++) {
+            for (int x = 0; x < tam; x++) {
+                float dx = x - centro;
+                float dy = y - centro;
+                float distanciaNormalizada = (float) Math.sqrt(dx * dx + dy * dy) / radioMax;
+                float alpha = MathUtils.clamp((distanciaNormalizada - 0.3f) / 0.7f, 0f, 1f);
+                alpha = alpha * alpha;
+                pixmap.setColor(0f, 0f, 0f, alpha);
+                pixmap.drawPixel(x, y);
+            }
+        }
+        Texture textura = new Texture(pixmap);
+        pixmap.dispose();
+        return textura;
+    }
+
+    /**
+     * Sistema unico de tension (pedido explicito del usuario 2026-08-04): calcula la distancia
+     * real al animatronico MAS CERCANO (nunca varios sonidos superpuestos) y ajusta el latido
+     * (silencio/normal/rapido, con histeresis para no parpadear en el borde) y la intensidad de
+     * la vineta a partir del mismo valor de "intensidad" normalizado, para que ambos efectos se
+     * sientan coherentes entre si.
+     */
+    private void actualizarLatidosYVineta(Vector3 posicionJugador) {
+        float distanciaMinima = Float.MAX_VALUE;
+        for (AIComponent ai : guardias) {
+            Entity entidad = entidadDeGuardia(ai);
+            Vector3 posGuardia = Mappers.transform.get(entidad).position;
+            float dx = posicionJugador.x - posGuardia.x;
+            float dz = posicionJugador.z - posGuardia.z;
+            float distancia = (float) Math.sqrt(dx * dx + dz * dz);
+            distanciaMinima = Math.min(distanciaMinima, distancia);
+        }
+
+        float intensidad = MathUtils.clamp(
+                (LATIDO_DISTANCIA_LEJOS - distanciaMinima) / (LATIDO_DISTANCIA_LEJOS - LATIDO_DISTANCIA_CERCA),
+                0f, 1f);
+
+        EstadoLatido estadoDeseado;
+        if (distanciaMinima >= LATIDO_DISTANCIA_LEJOS) {
+            estadoDeseado = EstadoLatido.SILENCIO;
+        } else if (estadoLatidoActual == EstadoLatido.RAPIDO) {
+            // histeresis: una vez en rapido, hace falta alejarse un poco mas del limite para
+            // volver a normal, evitando parpadeo si el jugador se queda justo en el borde.
+            estadoDeseado = distanciaMinima > LATIDO_DISTANCIA_CERCA + LATIDO_HISTERESIS
+                    ? EstadoLatido.NORMAL : EstadoLatido.RAPIDO;
+        } else {
+            estadoDeseado = distanciaMinima < LATIDO_DISTANCIA_CERCA
+                    ? EstadoLatido.RAPIDO : EstadoLatido.NORMAL;
+        }
+
+        if (estadoDeseado != estadoLatidoActual) {
+            if (idSonidoLatidoActivo != -1) {
+                Sound sonidoAnterior = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
+                sonidoAnterior.stop(idSonidoLatidoActivo);
+                idSonidoLatidoActivo = -1;
+            }
+            if (estadoDeseado == EstadoLatido.NORMAL) {
+                idSonidoLatidoActivo = sonidoLatidoNormal.loop(LATIDO_VOLUMEN_MINIMO);
+            } else if (estadoDeseado == EstadoLatido.RAPIDO) {
+                idSonidoLatidoActivo = sonidoLatidoRapido.loop(LATIDO_VOLUMEN_MINIMO);
+            }
+            estadoLatidoActual = estadoDeseado;
+        }
+
+        if (idSonidoLatidoActivo != -1) {
+            Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
+            float volumen = LATIDO_VOLUMEN_MINIMO + (1f - LATIDO_VOLUMEN_MINIMO) * intensidad;
+            sonidoActivo.setVolume(idSonidoLatidoActivo, volumen);
+        }
+
+        if (intensidad > 0f) {
+            Gdx.gl.glEnable(GL20.GL_BLEND);
+            uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            uiBatch.begin();
+            uiBatch.setColor(1f, 1f, 1f, intensidad * VINETA_ALPHA_MAXIMA);
+            uiBatch.draw(texturaVineta, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            uiBatch.setColor(Color.WHITE);
+            uiBatch.end();
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+        }
+    }
+
+    /**
+     * Detiene el latido activo (si hay alguno). Necesario al entrar a JUMPSCARE/ESTATICA/
+     * CORAZONES_RESPAWN: esos estados retornan temprano en render() y nunca vuelven a llamar
+     * actualizarLatidosYVineta hasta que el jugador reaparece, asi que sin este corte explicito el
+     * latido seguia sonando debajo del grito del jumpscare y la estatica -- viola la regla propia
+     * de "un solo sonido, nunca superpuesto" del sistema de tension.
+     */
+    private void detenerLatidos() {
+        if (idSonidoLatidoActivo != -1) {
+            Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
+            sonidoActivo.stop(idSonidoLatidoActivo);
+            idSonidoLatidoActivo = -1;
+            estadoLatidoActual = EstadoLatido.SILENCIO;
+        }
     }
 
     @Override
@@ -349,6 +490,8 @@ public class GameplayScreen implements Screen {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
         sceneManager.update(dt);
         sceneManager.render();
+
+        actualizarLatidosYVineta(playerTransform.position);
 
         manejarBotonSalir();
 
@@ -416,6 +559,7 @@ public class GameplayScreen implements Screen {
         estado = EstadoPartida.JUMPSCARE;
         tiempoEnEstado = 0f;
         guardiaQueAtrapo = culpable;
+        detenerLatidos();
         idSonidoJumpscareActivo = sonidoJumpscare.play();
 
         // NO se retira mapScene de la escena (a diferencia de una version anterior de esta
@@ -727,6 +871,8 @@ public class GameplayScreen implements Screen {
         }
         texturaCorazonLleno.dispose();
         texturaCorazonVacio.dispose();
+        detenerLatidos();
+        texturaVineta.dispose();
         assets.dispose();
     }
 }

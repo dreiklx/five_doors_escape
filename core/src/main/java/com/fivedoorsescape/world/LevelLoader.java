@@ -124,7 +124,26 @@ public class LevelLoader {
      */
     private static final float DOOR_CLEARANCE_MARGIN = 0.4f;
 
-    public void buildStaticColliders(Scene mapScene, CollisionWorld collisionWorld) {
+    /**
+     * Radio (unidades de mundo, X/Z) alrededor de la puerta de salida real dentro del cual una
+     * puerta detectada por nombre ("puerta...") se excluye del despejado automatico de colision
+     * (ver esParteDePuertaOCortina/collectDoorZones). Sin esta exclusion, la puerta de salida
+     * (nodo real "puerta.005_46", hijo real "Object_60" con la malla de la hoja de puerta)
+     * quedaba atravesable como cualquier otra puerta interior "permanentemente abierta" -- pero
+     * la puerta de salida es la unica que debe seguir siendo solida: la victoria se activa solo
+     * al TOCARLA (ver exitRadius en GameplayScreen), no al caminar a traves de ella.
+     *
+     * Nota importante: "exitX"/"exitZ" en pizzeria.json originalmente apuntaban a un punto en
+     * piso abierto real, ~1.5 unidades separado de la posicion real de la hoja de puerta
+     * (Object_60) -- de ahi la regresion real reportada por el usuario (se podia "ganar" sin
+     * tocar nunca la puerta, caminando por una zona nunca protegida por ninguna colision). Se
+     * corrigieron esas coordenadas para que coincidan con el centro real de Object_60, y
+     * exitRadius se ajusto a 0.75 (medido con sondeo real de colision: el jugador nunca puede
+     * acercarse a menos de ~0.65 unidades del centro real de la puerta antes de quedar bloqueado).
+     */
+    private static final float RADIO_EXCLUSION_PUERTA_SALIDA = 2.0f;
+
+    public void buildStaticColliders(Scene mapScene, CollisionWorld collisionWorld, float exitX, float exitZ) {
         BoundingBox mapFootprint = new BoundingBox();
         mapScene.modelInstance.calculateBoundingBox(mapFootprint);
         Vector3 mapDims = mapFootprint.getDimensions(new Vector3());
@@ -132,7 +151,7 @@ public class LevelLoader {
         Array<BoundingBox> puertaZonas = new Array<>();
         Array<Node> nodes = mapScene.modelInstance.nodes;
         for (Node node : nodes) {
-            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas);
+            collectDoorZones(node, mapScene.modelInstance.transform, puertaZonas, exitX, exitZ);
         }
 
         for (Node node : nodes) {
@@ -148,21 +167,29 @@ public class LevelLoader {
      * despejarla de colision mas adelante -- tanto de si misma como de cualquier celda de pared
      * subdividida que la cubra.
      */
-    private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out) {
+    private void collectDoorZones(Node node, Matrix4 instanceTransform, Array<BoundingBox> out,
+            float exitX, float exitZ) {
         if (node.parts.size > 0 && esParteDePuertaOCortina(node)) {
             BoundingBox nodeBox = new BoundingBox();
             node.calculateBoundingBox(nodeBox, true);
             if (nodeBox.isValid()) {
                 nodeBox.mul(instanceTransform);
-                nodeBox.min.x -= DOOR_CLEARANCE_MARGIN;
-                nodeBox.max.x += DOOR_CLEARANCE_MARGIN;
-                nodeBox.min.z -= DOOR_CLEARANCE_MARGIN;
-                nodeBox.max.z += DOOR_CLEARANCE_MARGIN;
-                out.add(nodeBox);
+                Vector3 centro = nodeBox.getCenter(new Vector3());
+                float dx = centro.x - exitX;
+                float dz = centro.z - exitZ;
+                boolean esPuertaDeSalida = (dx * dx + dz * dz)
+                        <= RADIO_EXCLUSION_PUERTA_SALIDA * RADIO_EXCLUSION_PUERTA_SALIDA;
+                if (!esPuertaDeSalida) {
+                    nodeBox.min.x -= DOOR_CLEARANCE_MARGIN;
+                    nodeBox.max.x += DOOR_CLEARANCE_MARGIN;
+                    nodeBox.min.z -= DOOR_CLEARANCE_MARGIN;
+                    nodeBox.max.z += DOOR_CLEARANCE_MARGIN;
+                    out.add(nodeBox);
+                }
             }
         }
         for (Node child : node.getChildren()) {
-            collectDoorZones(child, instanceTransform, out);
+            collectDoorZones(child, instanceTransform, out, exitX, exitZ);
         }
     }
 
