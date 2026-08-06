@@ -4,6 +4,7 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
+import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -17,6 +18,12 @@ import com.fivedoorsescape.util.Lang;
  * aprobacion explicita del usuario -- ver memoria de Claude "project-libgdx-office-spawn-exit-design").
  * Simetrica a NightGameOverScreen en estructura y estetica; unica interaccion: cerrar el juego
  * (mismo mecanismo Gdx.app.exit() que Swing ya detecta via Process.waitFor() para volver al menu).
+ *
+ * Unificada con el juego principal (pedido explicito del usuario 2026-08-06): mantiene una
+ * musica de victoria real (circus.wav, el mismo tema que ya usa la pantalla de Win de Swing --
+ * reutilizado, no un asset nuevo) en loop mientras esta pantalla esta visible, en vez de silencio
+ * total. "Luego volver al menu normalmente" -- sin botones extra aqui, ESC sigue siendo la unica
+ * salida (a diferencia de Game Over, que si necesita distinguir Reintentar de Salir).
  */
 public class EscapeVictoryScreen implements Screen {
 
@@ -26,6 +33,8 @@ public class EscapeVictoryScreen implements Screen {
     private SpriteBatch batch;
     private BitmapFont fontTitulo;
     private BitmapFont fontMensaje;
+    private Sound sonidoVictoria;
+    private long idSonidoVictoria = -1;
 
     public EscapeVictoryScreen(Game game, HandoffData handoff) {
         this.game = game;
@@ -45,6 +54,12 @@ public class EscapeVictoryScreen implements Screen {
         fontMensaje = new BitmapFont();
         fontMensaje.getData().setScale(2f);
         fontMensaje.setColor(Color.WHITE);
+
+        // Cargado directo (no via AssetService/BootScreen): esta pantalla solo se alcanza una
+        // vez, al final de una partida ganada -- no vale la pena precargarlo desde el arranque
+        // para un uso que puede no llegar a ocurrir nunca en una sesion dada.
+        sonidoVictoria = Gdx.audio.newSound(Gdx.files.internal("sounds/circus.wav"));
+        idSonidoVictoria = sonidoVictoria.loop();
     }
 
     @Override
@@ -91,5 +106,9 @@ public class EscapeVictoryScreen implements Screen {
         batch.dispose();
         fontTitulo.dispose();
         fontMensaje.dispose();
+        if (idSonidoVictoria != -1) {
+            sonidoVictoria.stop(idSonidoVictoria);
+        }
+        sonidoVictoria.dispose();
     }
 }

@@ -116,6 +116,10 @@ public class GameplayScreen implements Screen {
      * de reuso de assets ya establecido para risa_freddy/jumpscare/estatica) -- un clic corto
      * generico encaja igual de bien como sonido de interruptor de linterna. */
     public static final String SONIDO_LINTERNA_CLICK = "sounds/linterna_click.wav";
+    /** Musica espacial de Freddy (pedido explicito del usuario 2026-08-06: "Freddy sea una
+     * especie de caja musical... que esa musica salga UNICAMENTE desde Freddy... audio
+     * espacial"). Ver actualizarMusicaEspacialFreddy(). */
+    public static final String SONIDO_MUSICA_FREDDY = "sounds/musica_escape_freddy.wav";
 
     /** Narracion de la cinematica inicial del modo Escape, en los 2 idiomas soportados (pedido
      * explicito del usuario 2026-08-05, mismos audios "Escape ES/EN" que el proyecto Swing usa
@@ -205,6 +209,9 @@ public class GameplayScreen implements Screen {
     private Entity playerEntity;
     private final Array<AIComponent> guardias = new Array<>();
     private final Array<Vector3> guardiaSpawns = new Array<>();
+    /** Referencia directa a Freddy (no a "el guardia mas cercano") -- necesaria para la musica
+     * espacial, que debe sonar desde Freddy especificamente, nunca desde Bonnie/Chica/Foxy. */
+    private Entity freddyEntity;
 
     private Cubemap diffuseCubemap;
     private Cubemap environmentCubemap;
@@ -282,6 +289,20 @@ public class GameplayScreen implements Screen {
     private long idSonidoLatidoActivo = -1;
     private Texture texturaVineta;
     private Sound sonidoEscape;
+
+    // Musica espacial de Freddy -- "caja musical" (pedido explicito del usuario 2026-08-06):
+    // suena UNICAMENTE desde la posicion real de Freddy, nunca como musica global. libGDX no
+    // trae un motor de audio 3D completo (sin doppler/oclusion), pero Sound SI soporta volumen y
+    // pan (izquierda/derecha) por instancia en reproduccion via setVolume(id,...)/setPan(id,...)
+    // -- el mismo mecanismo ya usado por el sistema de latidos (Sound.loop(vol) + setVolume(id,
+    // vol) cada frame), aqui extendido con pan real para que ademas de "mas cerca=mas fuerte" se
+    // sienta la DIRECCION real de Freddy respecto a hacia donde mira la camara. Es la forma
+    // idiomatica de audio posicional simple en libGDX sin agregar ninguna libreria nueva.
+    private static final float MUSICA_FREDDY_DISTANCIA_MAXIMA = 14f;
+    private static final float MUSICA_FREDDY_DISTANCIA_MINIMA = 1.5f;
+    private Sound sonidoMusicaFreddy;
+    private long idSonidoMusicaFreddy = -1;
+    private final Vector3 derechaCamaraTmp = new Vector3();
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -448,6 +469,12 @@ public class GameplayScreen implements Screen {
         sonidoLatidoNormal = assets.getSound(SONIDO_LATIDO_NORMAL);
         sonidoLatidoRapido = assets.getSound(SONIDO_LATIDO_RAPIDO);
         sonidoLinternaClick = assets.getSound(SONIDO_LINTERNA_CLICK);
+        sonidoMusicaFreddy = assets.getSound(SONIDO_MUSICA_FREDDY);
+        // Arranca en loop UNA sola vez, en silencio -- el volumen/pan real se actualiza cada
+        // frame en actualizarMusicaEspacialFreddy() segun la distancia/direccion real a Freddy.
+        // Nunca se reinicia/vuelve a lanzar -- un unico Sound.loop() para toda la partida, como
+        // corresponde a una "caja musical" que Freddy lleva encima todo el tiempo.
+        idSonidoMusicaFreddy = sonidoMusicaFreddy.loop(0f);
         texturaVineta = crearTexturaVineta();
 
         // GIF real de estatica de FiveDoorsAtFreddys (efecto de transicion generico, aprobado
@@ -603,6 +630,42 @@ public class GameplayScreen implements Screen {
     }
 
     /**
+     * "Caja musical" de Freddy (pedido explicito del usuario 2026-08-06): actualiza volumen y pan
+     * de la unica instancia de sonidoMusicaFreddy (ya en loop desde show(), nunca se reinicia)
+     * segun la posicion real de Freddy respecto a la camara -- mas cerca = mas fuerte, y el pan
+     * refleja si Freddy esta a la izquierda o a la derecha de hacia donde mira el jugador ahora
+     * mismo. Distancia horizontal (X/Z) solamente, mismo criterio ya usado por IdleState/
+     * ChaseState para no penalizar la diferencia de altura pies-vs-camara.
+     */
+    private void actualizarMusicaEspacialFreddy() {
+        if (freddyEntity == null || idSonidoMusicaFreddy == -1) {
+            return;
+        }
+        Vector3 posFreddy = Mappers.transform.get(freddyEntity).position;
+        float dx = posFreddy.x - camera.position.x;
+        float dz = posFreddy.z - camera.position.z;
+        float distancia = (float) Math.sqrt(dx * dx + dz * dz);
+
+        float volumen = MathUtils.clamp(
+                (MUSICA_FREDDY_DISTANCIA_MAXIMA - distancia)
+                        / (MUSICA_FREDDY_DISTANCIA_MAXIMA - MUSICA_FREDDY_DISTANCIA_MINIMA),
+                0f, 1f);
+
+        // Pan real: proyecta la direccion hacia Freddy sobre el eje "derecha" de la camara --
+        // mismo cross product (direction x up) que usa Matrix4.setToLookAt internamente, ya
+        // verificado contra la convencion real del motor al corregir el strafe A/D (ver
+        // FirstPersonCameraController). Positivo = Freddy a la derecha, negativo = a la
+        // izquierda, 0 = justo al frente o detras.
+        float pan = 0f;
+        if (distancia > 0.01f) {
+            derechaCamaraTmp.set(camera.direction).crs(camera.up).nor();
+            pan = MathUtils.clamp((dx * derechaCamaraTmp.x + dz * derechaCamaraTmp.z) / distancia, -1f, 1f);
+        }
+
+        sonidoMusicaFreddy.setPan(idSonidoMusicaFreddy, pan, volumen);
+    }
+
+    /**
      * Detiene el latido activo (si hay alguno). Necesario al entrar a JUMPSCARE/ESTATICA/
      * CORAZONES_RESPAWN: esos estados retornan temprano en render() y nunca vuelven a llamar
      * actualizarLatidosYVineta hasta que el jugador reaparece, asi que sin este corte explicito el
@@ -690,6 +753,7 @@ public class GameplayScreen implements Screen {
         sceneManager.render();
 
         actualizarLatidosYVineta(playerTransform.position);
+        actualizarMusicaEspacialFreddy();
 
         dibujarAyudaInicial(dt);
 
@@ -1225,6 +1289,11 @@ public class GameplayScreen implements Screen {
         ai.siempreEnPersecucion = persigueSiempre;
         guardias.add(ai);
         guardiaSpawns.add(new Vector3(posicion));
+        if (persigueSiempre) {
+            // Unico guardia con persigueSiempre=true es Freddy (ver decision de diseno del
+            // usuario 2026-08-03) -- identificacion robusta sin depender del orden de creacion.
+            freddyEntity = entidad;
+        }
 
         warnIfEmbedded(nombreParaLog, posicion, Mappers.collision.get(entidad).halfExtents);
 
@@ -1278,6 +1347,10 @@ public class GameplayScreen implements Screen {
         texturaCorazonLleno.dispose();
         texturaCorazonVacio.dispose();
         detenerLatidos();
+        if (idSonidoMusicaFreddy != -1) {
+            sonidoMusicaFreddy.stop(idSonidoMusicaFreddy);
+            idSonidoMusicaFreddy = -1;
+        }
         texturaVineta.dispose();
         assets.dispose();
     }
