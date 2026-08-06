@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.fivedoorsescape.io.HandoffData;
+import com.fivedoorsescape.util.Lang;
 
 /**
  * Replica visual (color/tipografia/mensaje, no geometria pixel-perfecta) de la pantalla de Game
@@ -54,8 +55,8 @@ public class NightGameOverScreen implements Screen {
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        String titulo = "GAME OVER";
-        String mensaje = handoff.idioma == HandoffData.Idioma.INGLES ? "Press ESC to quit" : "Presiona ESC para salir";
+        String titulo = Lang.get(handoff.idioma, "gameOver.title");
+        String mensaje = Lang.get(handoff.idioma, "gameOver.message");
 
         GlyphLayout layoutTitulo = new GlyphLayout(fontTitulo, titulo);
         GlyphLayout layoutMensaje = new GlyphLayout(fontMensaje, mensaje);

@@ -12,6 +12,7 @@ import com.fivedoorsescape.content.EntityDefinition;
 import com.fivedoorsescape.content.MapDefinition;
 import com.fivedoorsescape.io.HandoffData;
 import com.fivedoorsescape.io.HandoffReader;
+import com.fivedoorsescape.util.Lang;
 
 /**
  * Lee el traspaso Swing->LibGDX, decide explicitamente que contenido cargar para esta sesion
@@ -67,7 +68,8 @@ public class BootScreen implements Screen {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
         batch.begin();
-        font.draw(batch, "Cargando... " + (int) (assets.getProgress() * 100) + "%", 20, Gdx.graphics.getHeight() - 20);
+        String texto = Lang.get(handoff.idioma, "loading.text") + " " + (int) (assets.getProgress() * 100) + "%";
+        font.draw(batch, texto, 20, Gdx.graphics.getHeight() - 20);
         batch.end();
 
         if (listo) {

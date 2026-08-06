@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.fivedoorsescape.io.HandoffData;
+import com.fivedoorsescape.util.Lang;
 
 /**
  * Condicion de victoria del Escape (Architecture.md original la excluia del MVP; expandido con
@@ -55,9 +56,8 @@ public class EscapeVictoryScreen implements Screen {
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        boolean ingles = handoff.idioma == HandoffData.Idioma.INGLES;
-        String titulo = ingles ? "YOU ESCAPED" : "ESCAPASTE";
-        String mensaje = ingles ? "Press ESC to quit" : "Presiona ESC para salir";
+        String titulo = Lang.get(handoff.idioma, "victory.title");
+        String mensaje = Lang.get(handoff.idioma, "victory.message");
 
         GlyphLayout layoutTitulo = new GlyphLayout(fontTitulo, titulo);
         GlyphLayout layoutMensaje = new GlyphLayout(fontMensaje, mensaje);

@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
@@ -38,6 +39,7 @@ import com.fivedoorsescape.ecs.systems.AnimationSystem;
 import com.fivedoorsescape.ecs.systems.RenderSyncSystem;
 import com.fivedoorsescape.io.HandoffData;
 import com.fivedoorsescape.util.GifDecoder;
+import com.fivedoorsescape.util.Lang;
 import com.fivedoorsescape.util.WavDuration;
 import com.fivedoorsescape.world.CollisionWorld;
 import com.fivedoorsescape.world.LevelLoader;
@@ -76,13 +78,24 @@ public class GameplayScreen implements Screen {
      * apagarla con CTRL, con un clic de sonido al cambiar de estado). */
     private static final float LINTERNA_INTENSIDAD_ENCENDIDA = 18f;
 
-    // Boton discreto de salida manual (esquina superior izquierda, ver memoria de Claude
-    // "project-libgdx-office-spawn-exit-design"): solo responde a clics cuando el cursor no
-    // esta capturado (ESC libera el cursor, ver isKeyJustPressed(ESCAPE) mas abajo) -- con el
-    // cursor capturado para mouse-look no hay una posicion de mouse visible que reciba el clic.
-    private static final float BOTON_SALIR_ANCHO = 140f;
-    private static final float BOTON_SALIR_ALTO = 44f;
-    private static final float BOTON_SALIR_MARGEN = 16f;
+    // Panel de ayuda de controles (pedido explicito del usuario 2026-08-05, reemplaza al viejo
+    // boton de salida de la esquina superior izquierda -- ese boton "realmente no servia porque
+    // durante la partida no puede interactuarse con el" sin soltar antes el mouse-look). Se
+    // muestra solo, no invasivo, durante los primeros segundos de JUGANDO y se desvanece solo --
+    // no bloquea el juego ni requiere ninguna accion del jugador. Ver dibujarAyudaInicial().
+    private static final float AYUDA_ANCHO = 320f;
+    private static final float AYUDA_ALTO = 118f;
+    private static final float AYUDA_MARGEN = 16f;
+    private static final float AYUDA_DURACION_VISIBLE = 9f;
+    private static final float AYUDA_DURACION_FUNDIDO = 1.5f;
+
+    // Menu de pausa (pedido explicito del usuario 2026-08-05): ESC ya no solo libera/recaptura
+    // el cursor, ahora tambien abre este menu -- unica opcion real: salir al menu principal
+    // (mismo mecanismo Gdx.app.exit() que Swing ya detecta via Process.waitFor(), ver
+    // LanzadorEscape del lado Swing). Sin botones de configuracion/reanudar (pedido explicito
+    // del usuario) -- ESC de nuevo ya cierra el menu, es la unica forma de reanudar.
+    private static final float PAUSA_BOTON_ANCHO = 300f;
+    private static final float PAUSA_BOTON_ALTO = 54f;
 
     /** Rutas de los 2 sonidos genericos de la secuencia de atrapada -- ver decision de diseno del
      * usuario 2026-08-03: reutilizar el jumpscare/estatica genericos ya existentes (ni Swing tiene
@@ -170,6 +183,11 @@ public class GameplayScreen implements Screen {
     private static final float JUMPSCARE_DISTANCIA_BASE = 0.75f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA, CORAZONES_RESPAWN }
+
+    private boolean pausado = false;
+    /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
+     * desvanecimiento del panel de ayuda inicial, ver dibujarAyudaInicial(). */
+    private float tiempoJugandoTranscurrido = 0f;
 
     private final Game game;
     private final ContentRegistry registry;
@@ -628,7 +646,20 @@ public class GameplayScreen implements Screen {
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            Gdx.input.setCursorCatched(!Gdx.input.isCursorCatched());
+            pausado = !pausado;
+            Gdx.input.setCursorCatched(!pausado);
+        }
+
+        if (pausado) {
+            // Mismo patron ya usado por la cinematica inicial para "congelar" la escena sin
+            // avanzar ningun clip: sceneManager.update(0f) mantiene camaras/luces sincronizadas,
+            // sceneManager.render() sigue dibujando el ultimo frame real -- ni la IA ni el
+            // jugador se mueven mientras el menu de pausa esta abierto.
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+            sceneManager.update(0f);
+            sceneManager.render();
+            dibujarMenuPausa();
+            return;
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.CONTROL_RIGHT)) {
@@ -660,7 +691,7 @@ public class GameplayScreen implements Screen {
 
         actualizarLatidosYVineta(playerTransform.position);
 
-        manejarBotonSalir();
+        dibujarAyudaInicial(dt);
 
         float dxSalida = playerTransform.position.x - exitX;
         float dzSalida = playerTransform.position.z - exitZ;
@@ -866,7 +897,7 @@ public class GameplayScreen implements Screen {
 
     private void actualizarIntroRun(float dt) {
         tiempoEnEstado += dt;
-        dibujarPantallaNegraConTexto("RUN");
+        dibujarPantallaNegraConTexto(Lang.get(handoff.idioma, "intro.run"));
         if (tiempoEnEstado >= DURACION_INTRO_RUN) {
             estado = EstadoPartida.JUGANDO;
             tiempoEnEstado = 0f;
@@ -1091,41 +1122,89 @@ public class GameplayScreen implements Screen {
     }
 
     /**
-     * Dibuja el boton de salida manual y responde al clic. El clic solo se evalua con el cursor
-     * liberado (ESC lo libera/recaptura, ver arriba) -- con el cursor capturado para mouse-look
-     * su posicion no representa un punto real que el jugador este viendo/apuntando.
+     * Panel de ayuda de controles (pedido explicito del usuario 2026-08-05): se dibuja solo,
+     * esquina superior izquierda, durante los primeros AYUDA_DURACION_VISIBLE segundos reales de
+     * JUGANDO, con un desvanecimiento suave en el ultimo AYUDA_DURACION_FUNDIDO -- nunca captura
+     * el mouse ni bloquea el input, el jugador puede moverse libremente desde el primer frame
+     * (no invasivo, pedido explicito del usuario). Todo el texto sale de Lang/strings*.properties.
      */
-    private void manejarBotonSalir() {
-        float x = BOTON_SALIR_MARGEN;
+    private void dibujarAyudaInicial(float dt) {
+        tiempoJugandoTranscurrido += dt;
+        if (tiempoJugandoTranscurrido >= AYUDA_DURACION_VISIBLE) {
+            return;
+        }
+
+        float tiempoRestante = AYUDA_DURACION_VISIBLE - tiempoJugandoTranscurrido;
+        float alpha = tiempoRestante < AYUDA_DURACION_FUNDIDO ? tiempoRestante / AYUDA_DURACION_FUNDIDO : 1f;
+
         // Y-up estandar de SpriteBatch/ShapeRenderer: valor grande = cerca del borde superior
-        // real de la pantalla. (Nota: las capturas de pantalla tomadas con
-        // PixmapIO.writePNG(file, pixmap) de 2 argumentos NO reflejan esto correctamente --
-        // esa sobrecarga usa flipY=false internamente, produciendo una imagen espejada
-        // verticalmente respecto a la pantalla real. Confirmado leyendo el codigo fuente de
-        // gdx-1.14.2-sources.jar. No usar esa sobrecarga para diagnosticos visuales futuros --
-        // usar la de 4 argumentos con flipY=true.)
-        float yDibujo = Gdx.graphics.getHeight() - BOTON_SALIR_MARGEN - BOTON_SALIR_ALTO;
+        // real de la pantalla (gotcha de capturas con flipY=false ya documentado -- no aplica
+        // aqui, esto es dibujo en vivo, no una captura de diagnostico).
+        float x = AYUDA_MARGEN;
+        float yDibujo = Gdx.graphics.getHeight() - AYUDA_MARGEN - AYUDA_ALTO;
 
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
         uiShapes.begin(ShapeRenderer.ShapeType.Filled);
-        uiShapes.setColor(0f, 0f, 0f, 0.55f);
-        uiShapes.rect(x, yDibujo, BOTON_SALIR_ANCHO, BOTON_SALIR_ALTO);
+        uiShapes.setColor(0f, 0f, 0f, 0.55f * alpha);
+        uiShapes.rect(x, yDibujo, AYUDA_ANCHO, AYUDA_ALTO);
+        uiShapes.end();
+
+        uiBatch.begin();
+        uiFont.setColor(1f, 1f, 1f, alpha);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.title"), x + 18f, yDibujo + AYUDA_ALTO - 16f);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.move"), x + 18f, yDibujo + AYUDA_ALTO - 48f);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.look"), x + 18f, yDibujo + AYUDA_ALTO - 74f);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.flashlight"), x + 18f, yDibujo + AYUDA_ALTO - 100f);
+        uiFont.setColor(Color.WHITE);
+        uiBatch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    /**
+     * Menu de pausa (pedido explicito del usuario 2026-08-05): overlay semitransparente de
+     * pantalla completa + un panel centrado con una unica opcion real, "salir al menu principal"
+     * -- sin botones de configuracion/reanudar (ESC de nuevo ya cierra el menu). Mismo mecanismo
+     * de salida (Gdx.app.exit()) que ya usan NightGameOverScreen/EscapeVictoryScreen y que Swing
+     * ya detecta correctamente via LanzadorEscape/Process.waitFor().
+     */
+    private void dibujarMenuPausa() {
+        float anchoPantalla = Gdx.graphics.getWidth();
+        float altoPantalla = Gdx.graphics.getHeight();
+
+        float botonX = anchoPantalla / 2f - PAUSA_BOTON_ANCHO / 2f;
+        float botonY = altoPantalla / 2f - PAUSA_BOTON_ALTO / 2f;
+
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, anchoPantalla, altoPantalla);
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, anchoPantalla, altoPantalla);
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(0f, 0f, 0f, 0.7f);
+        uiShapes.rect(0, 0, anchoPantalla, altoPantalla);
+        uiShapes.setColor(0.15f, 0.15f, 0.15f, 0.9f);
+        uiShapes.rect(botonX, botonY, PAUSA_BOTON_ANCHO, PAUSA_BOTON_ALTO);
         uiShapes.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
 
-        String texto = handoff.idioma == HandoffData.Idioma.INGLES ? "Exit" : "Salir";
+        String titulo = Lang.get(handoff.idioma, "pause.title");
+        String textoBoton = Lang.get(handoff.idioma, "pause.exitToMenu");
+        GlyphLayout layoutTitulo = new GlyphLayout(uiFont, titulo);
+        GlyphLayout layoutBoton = new GlyphLayout(uiFont, textoBoton);
+
         uiBatch.begin();
-        uiFont.draw(uiBatch, texto, x + 20f, yDibujo + BOTON_SALIR_ALTO - 13f);
+        uiFont.draw(uiBatch, layoutTitulo, anchoPantalla / 2f - layoutTitulo.width / 2f, botonY + PAUSA_BOTON_ALTO + 60f);
+        uiFont.draw(uiBatch, layoutBoton, anchoPantalla / 2f - layoutBoton.width / 2f, botonY + PAUSA_BOTON_ALTO / 2f + layoutBoton.height / 2f);
         uiBatch.end();
 
-        if (!Gdx.input.isCursorCatched() && Gdx.input.justTouched()) {
+        if (Gdx.input.justTouched()) {
             float touchX = Gdx.input.getX();
             float touchYDesdeArriba = Gdx.input.getY();
-            boolean dentroX = touchX >= x && touchX <= x + BOTON_SALIR_ANCHO;
-            boolean dentroY = touchYDesdeArriba >= BOTON_SALIR_MARGEN && touchYDesdeArriba <= BOTON_SALIR_MARGEN + BOTON_SALIR_ALTO;
+            float touchYDesdeAbajo = altoPantalla - touchYDesdeArriba;
+            boolean dentroX = touchX >= botonX && touchX <= botonX + PAUSA_BOTON_ANCHO;
+            boolean dentroY = touchYDesdeAbajo >= botonY && touchYDesdeAbajo <= botonY + PAUSA_BOTON_ALTO;
             if (dentroX && dentroY) {
                 Gdx.app.exit();
             }
