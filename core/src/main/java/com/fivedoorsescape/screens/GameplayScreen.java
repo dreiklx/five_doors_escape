@@ -954,6 +954,9 @@ public class GameplayScreen implements Screen {
             if (!risaFreddyReproducida) {
                 sonidoRisaFreddy.play();
                 risaFreddyReproducida = true;
+                // Avisa al lado Swing (proceso independiente) para que baje el volumen de
+                // LesToreadorsRemix ~25% en este momento -- ver SenalRisaFreddy.
+                com.fivedoorsescape.io.SenalRisaFreddy.marcar();
                 Gdx.app.log("GameplayScreen", "Risa de Freddy reproducida (una sola vez) al mostrar RUN");
             }
         }
