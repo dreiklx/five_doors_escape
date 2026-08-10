@@ -10,6 +10,7 @@ import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -17,9 +18,18 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
+import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 
 import com.fivedoorsescape.ai.states.IdleState;
@@ -84,7 +94,8 @@ public class GameplayScreen implements Screen {
     // muestra solo, no invasivo, durante los primeros segundos de JUGANDO y se desvanece solo --
     // no bloquea el juego ni requiere ninguna accion del jugador. Ver dibujarAyudaInicial().
     private static final float AYUDA_ANCHO = 320f;
-    private static final float AYUDA_ALTO = 118f;
+    // 118 -> 144: una linea mas para "E: Interactuar" (pedido explicito del usuario 2026-08-10).
+    private static final float AYUDA_ALTO = 144f;
     private static final float AYUDA_MARGEN = 16f;
     private static final float AYUDA_DURACION_VISIBLE = 9f;
     private static final float AYUDA_DURACION_FUNDIDO = 1.5f;
@@ -120,6 +131,10 @@ public class GameplayScreen implements Screen {
      * especie de caja musical... que esa musica salga UNICAMENTE desde Freddy... audio
      * espacial"). Ver actualizarMusicaEspacialFreddy(). */
     public static final String SONIDO_MUSICA_FREDDY = "sounds/musica_escape_freddy.wav";
+    /** Reutilizado de FDAF assets (pedido explicito del usuario 2026-08-10): se reproduce cuando
+     * el jugador interactua con la puerta de salida SIN tener la llave -- ver
+     * actualizarInteraccion()/objetosInteractivos. */
+    public static final String SONIDO_FORZANDO_PUERTA = "sounds/forzando_puerta.wav";
 
     /** Narracion de la cinematica inicial del modo Escape, en los 2 idiomas soportados (pedido
      * explicito del usuario 2026-08-05, mismos audios "Escape ES/EN" que el proyecto Swing usa
@@ -239,7 +254,12 @@ public class GameplayScreen implements Screen {
     // "RUN" -> JUGANDO. Al atrapar: jumpscare cinematografico (camara + modelo 3D del culpable)
     // -> estatica (GIF real + sonido) -> corazones restantes -> reaparece, o Game Over definitivo
     // si no queda ninguno.
-    private static final int VIDAS_INICIALES = 2;
+    // 3 vidas (antes 2, pedido explicito del usuario 2026-08-10) -- dibujarPantallaNegraConCorazones
+    // ya calculaba el ancho total y el espaciado de corazones a partir de esta constante (nunca un
+    // "2" hardcodeado en el dibujo), asi que subirla a 3 basta por si sola: se dibujan 3 corazones
+    // reales (texturaCorazonLleno/texturaCorazonVacio, ya cargados desde assets/textures) sin
+    // ningun otro cambio de logica.
+    private static final int VIDAS_INICIALES = 3;
     private EstadoPartida estado = EstadoPartida.CINEMATICA_INICIAL;
     private float tiempoEnEstado = 0f;
     private int vidasRestantes = VIDAS_INICIALES;
@@ -304,6 +324,55 @@ public class GameplayScreen implements Screen {
     private long idSonidoMusicaFreddy = -1;
     private final Vector3 derechaCamaraTmp = new Vector3();
 
+    // ------------------------------------------------------------------
+    // Sistema de interaccion (pedido explicito del usuario 2026-08-10): crosshair discreto en el
+    // centro de la pantalla + raycast real (Intersector.intersectRaySphere, no una heuristica de
+    // angulo) desde la camara hacia una lista pequeña de objetos interactuables (llave, puerta de
+    // salida) + tecla E. Deliberadamente NO es un sistema generico de "cualquier objeto del mapa
+    // es interactuable" -- solo los objetos que de verdad necesitan interaccion se registran en
+    // objetosInteractivos, tal como pidio el usuario ("no quiero que E interactue con cualquier
+    // cosa indiscriminadamente").
+    // ------------------------------------------------------------------
+
+    /** Un objeto con el que el jugador puede interactuar (E) si el rayo de la camara lo golpea
+     * (esfera de radio "radio" centrada en "posicion") y esta a "distanciaMaxima" o menos. */
+    private static final class ObjetoInteractivo {
+        final Vector3 posicion = new Vector3();
+        float radio;
+        float distanciaMaxima;
+        boolean activo = true;
+        Runnable accion;
+    }
+
+    private static final float LLAVE_RADIO_INTERACCION = 0.4f;
+    private static final float LLAVE_DISTANCIA_MAXIMA = 2.2f;
+    private static final float PUERTA_RADIO_INTERACCION = 0.6f;
+    /** Margen sobre exitRadius (calibrado en sesiones anteriores contra la colision real de la
+     * puerta -- ver LevelLoader.RADIO_EXCLUSION_PUERTA_SALIDA) para la distancia maxima de
+     * interaccion: el jugador nunca puede acercarse mas de exitRadius al centro real de la
+     * puerta (la bloquea su propia colision solida), asi que este margen solo da holgura extra,
+     * nunca reduce el rango real necesario. */
+    private static final float PUERTA_MARGEN_DISTANCIA_INTERACCION = 1.25f;
+    // Verificado con una captura real -- 2.5px resultaba casi invisible en 1920x1080 (menos de 5
+    // pixeles de diametro). 3.2/5.5 sigue siendo pequeño y discreto (muy por debajo de un
+    // crosshair de FPS tipico) pero real perceptible sin dejar de ser sutil.
+    private static final float CROSSHAIR_RADIO_NORMAL = 3.2f;
+    private static final float CROSSHAIR_RADIO_ACTIVO = 5.5f;
+    private static final float MENSAJE_LLAVE_DURACION = 2.5f;
+
+    private final Array<ObjetoInteractivo> objetosInteractivos = new Array<>();
+    private ObjetoInteractivo objetivoInteractivoActual;
+    private final Ray rayInteraccion = new Ray(new Vector3(), new Vector3(0f, 0f, 1f));
+    private final Vector3 tmpInterseccion = new Vector3();
+
+    private Entity entidadLlave;
+    private boolean tieneLlave = false;
+    private Sound sonidoForzandoPuerta;
+    private float mensajeLlaveTiempoRestante = 0f;
+
+    private Texture texturaSangre;
+    private final Array<Model> modelosDecalSangre = new Array<>();
+
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
         this.registry = registry;
@@ -325,6 +394,8 @@ public class GameplayScreen implements Screen {
 
         levelLoader.buildStaticColliders(mapScene, collisionWorld, exitX, exitZ);
         Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
+        collisionWorld.configurarEscalon(mapDef.stageMinX, mapDef.stageMaxX, mapDef.stageMinZ, mapDef.stageMaxZ,
+                mapDef.stageHeight);
 
         camera = new PerspectiveCamera(67f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.near = 0.05f;
@@ -360,6 +431,31 @@ public class GameplayScreen implements Screen {
 
         Vector3 foxyStart = new Vector3(mapDef.foxyStartX, 0f, mapDef.foxyStartZ);
         numBones = Math.max(numBones, crearGuardia(factory, "foxy", foxyStart, "Foxy", false));
+
+        // Llave en la cocina (pedido explicito del usuario 2026-08-10): entidad estatica sin IA,
+        // creada ANTES del bucle de mas abajo que agrega cada entidad con ModelComponent a
+        // sceneManager -- se suma automaticamente sin plumbing adicional, igual que los 4
+        // animatronicos. Se retira de la escena (sceneManager.removeScene) al recogerla, ver
+        // recogerLlave().
+        Vector3 llavePos = new Vector3(mapDef.keyX, mapDef.keyY, mapDef.keyZ);
+        entidadLlave = factory.createEntity("llave", llavePos, mapDef.keyYawDegrees);
+        ObjetoInteractivo interactivoLlave = new ObjetoInteractivo();
+        interactivoLlave.posicion.set(llavePos);
+        interactivoLlave.radio = LLAVE_RADIO_INTERACCION;
+        interactivoLlave.distanciaMaxima = LLAVE_DISTANCIA_MAXIMA;
+        interactivoLlave.accion = this::recogerLlave;
+        objetosInteractivos.add(interactivoLlave);
+
+        // Puerta de salida (pedido explicito del usuario 2026-08-10): ya no gana automaticamente
+        // por proximidad -- ahora requiere interactuar (E) con la puerta, exactamente igual que la
+        // llave. Y=1.2 (altura de pecho/ojos aproximada) para que el rayo de la camara la golpee
+        // con normalidad al mirar hacia adelante desde la distancia real de interaccion.
+        ObjetoInteractivo interactivoPuerta = new ObjetoInteractivo();
+        interactivoPuerta.posicion.set(exitX, 1.2f, exitZ);
+        interactivoPuerta.radio = PUERTA_RADIO_INTERACCION;
+        interactivoPuerta.distanciaMaxima = exitRadius + PUERTA_MARGEN_DISTANCIA_INTERACCION;
+        interactivoPuerta.accion = this::interactuarConPuertaSalida;
+        objetosInteractivos.add(interactivoPuerta);
 
         // Config manual (no el atajo createDefault(int)) unicamente para habilitar numSpotLights:
         // por defecto (DefaultShader.Config heredado) vale 0 -- la linterna del jugador (SpotLightEx
@@ -454,6 +550,8 @@ public class GameplayScreen implements Screen {
         skybox = new SceneSkybox(environmentCubemap);
         sceneManager.setSkyBox(skybox);
 
+        crearDecalesSangre();
+
         uiBatch = new SpriteBatch();
         uiFont = new BitmapFont();
         uiFont.getData().setScale(1.3f);
@@ -470,6 +568,7 @@ public class GameplayScreen implements Screen {
         sonidoLatidoRapido = assets.getSound(SONIDO_LATIDO_RAPIDO);
         sonidoLinternaClick = assets.getSound(SONIDO_LINTERNA_CLICK);
         sonidoMusicaFreddy = assets.getSound(SONIDO_MUSICA_FREDDY);
+        sonidoForzandoPuerta = assets.getSound(SONIDO_FORZANDO_PUERTA);
         // Arranca en loop UNA sola vez, en silencio -- el volumen/pan real se actualiza cada
         // frame en actualizarMusicaEspacialFreddy() segun la distancia/direccion real a Freddy.
         // Nunca se reinicia/vuelve a lanzar -- un unico Sound.loop() para toda la partida, como
@@ -556,6 +655,79 @@ public class GameplayScreen implements Screen {
                 pixmap.setColor(0f, 0f, 0f, alpha);
                 pixmap.drawPixel(x, y);
             }
+        }
+        Texture textura = new Texture(pixmap);
+        pixmap.dispose();
+        return textura;
+    }
+
+    /**
+     * Mancha de sangre ambiental frente a la puerta de salida (pedido explicito del usuario
+     * 2026-08-10): terror sutil, nunca una flecha literal -- una mancha principal irregular mas
+     * dos gotas mas pequeñas escalonadas, cada vez mas cerca de la puerta, generadas con la misma
+     * tecnica ya usada por crearTexturaVineta (Pixmap procedural, sin asset externo nuevo). Y del
+     * lado de la puerta por donde realmente se puede caminar (offset positivo en Z, confirmado por
+     * la topologia real del mapa -- ver CLAUDE.md, el area abierta real queda al norte del punto
+     * exitZ). Quads pintados a nivel de piso (Y=0.015, evita z-fighting con el piso real) con
+     * blending real y sin backface culling (mismo patron que el mapa).
+     */
+    private void crearDecalesSangre() {
+        texturaSangre = crearTexturaSangre();
+        ModelBuilder modelBuilder = new ModelBuilder();
+        agregarDecalSangre(modelBuilder, exitX, exitZ + 1.4f, 1.3f);
+        agregarDecalSangre(modelBuilder, exitX + 0.25f, exitZ + 0.85f, 0.55f);
+        agregarDecalSangre(modelBuilder, exitX - 0.2f, exitZ + 0.45f, 0.4f);
+    }
+
+    private void agregarDecalSangre(ModelBuilder modelBuilder, float x, float z, float tamano) {
+        // PBRTextureAttribute (gdx-gltf), NO el TextureAttribute estandar de libGDX -- el shader
+        // de profundidad/sombras de gdx-gltf (PBRDepthShader.bindMaterial) castea directamente a
+        // PBRTextureAttribute sin comprobar el tipo real; usar el estandar producia un
+        // ClassCastException real en cuanto SceneManager intentaba renderizar la sombra de este
+        // decal (confirmado en ejecucion real).
+        Material material = new Material(
+                PBRTextureAttribute.createBaseColorTexture(texturaSangre),
+                new BlendingAttribute(true, 1f),
+                IntAttribute.createCullFace(0));
+        modelBuilder.begin();
+        MeshPartBuilder parte = modelBuilder.part("sangre", GL20.GL_TRIANGLES,
+                VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates,
+                material);
+        float mitad = tamano / 2f;
+        parte.rect(
+                -mitad, 0f, -mitad, mitad, 0f, -mitad, mitad, 0f, mitad, -mitad, 0f, mitad,
+                0f, 1f, 0f);
+        Model modelo = modelBuilder.end();
+        modelosDecalSangre.add(modelo);
+
+        ModelInstance instancia = new ModelInstance(modelo);
+        instancia.transform.setToTranslation(x, 0.015f, z);
+        sceneManager.addScene(new Scene(instancia));
+    }
+
+    /** Genera una textura de mancha de sangre irregular por procedimiento (varias manchas
+     * circulares superpuestas, radios/alphas/desplazamientos aleatorios pero con semilla fija
+     * para que el resultado sea siempre el mismo entre partidas) -- nunca un circulo perfecto ni
+     * una forma geometrica limpia, para que se sienta organico y no una decoracion artificial. */
+    private Texture crearTexturaSangre() {
+        int tam = 256;
+        Pixmap pixmap = new Pixmap(tam, tam, Pixmap.Format.RGBA8888);
+        pixmap.setColor(0f, 0f, 0f, 0f);
+        pixmap.fill();
+
+        java.util.Random random = new java.util.Random(20260810L);
+        float centro = tam / 2f;
+        int manchas = 16;
+        for (int i = 0; i < manchas; i++) {
+            float angulo = random.nextFloat() * MathUtils.PI2;
+            float distancia = random.nextFloat() * tam * 0.3f;
+            float mx = centro + MathUtils.cos(angulo) * distancia;
+            float my = centro + MathUtils.sin(angulo) * distancia;
+            int radio = (int) (tam * (0.07f + random.nextFloat() * 0.2f));
+            float alpha = 0.5f + random.nextFloat() * 0.4f;
+            float rojo = (55 + random.nextInt(55)) / 255f;
+            pixmap.setColor(rojo, 0f, 0f, alpha);
+            pixmap.fillCircle((int) mx, (int) my, radio);
         }
         Texture textura = new Texture(pixmap);
         pixmap.dispose();
@@ -715,6 +887,118 @@ public class GameplayScreen implements Screen {
         }
     }
 
+    /**
+     * Actualiza el objetivo interactivo actual (raycast real desde la camara, ver ObjetoInteractivo)
+     * y dispara su accion si el jugador presiona E este frame. Solo un objetivo a la vez -- el mas
+     * cercano de los que el rayo golpea dentro de su distanciaMaxima.
+     */
+    private void actualizarInteraccion() {
+        objetivoInteractivoActual = null;
+        float mejorDistancia = Float.MAX_VALUE;
+        rayInteraccion.origin.set(camera.position);
+        rayInteraccion.direction.set(camera.direction);
+
+        for (ObjetoInteractivo objeto : objetosInteractivos) {
+            if (!objeto.activo) {
+                continue;
+            }
+            boolean golpea = Intersector.intersectRaySphere(rayInteraccion, objeto.posicion, objeto.radio, tmpInterseccion);
+            if (!golpea) {
+                continue;
+            }
+            float distancia = camera.position.dst(objeto.posicion);
+            if (distancia <= objeto.distanciaMaxima && distancia < mejorDistancia) {
+                mejorDistancia = distancia;
+                objetivoInteractivoActual = objeto;
+            }
+        }
+
+        if (objetivoInteractivoActual != null && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            Runnable accion = objetivoInteractivoActual.accion;
+            if (accion != null) {
+                accion.run();
+            }
+        }
+    }
+
+    /** Recoge la llave: la retira de la escena (deja de dibujarse) y marca su interactivo como
+     * inactivo -- la entidad Ashley en si se deja viva (invisible, no forma parte de sceneManager),
+     * mas simple que desmontar toda su maquinaria ECS para un objeto que ya no necesita nada mas. */
+    private void recogerLlave() {
+        if (tieneLlave) {
+            return;
+        }
+        tieneLlave = true;
+        for (ObjetoInteractivo objeto : objetosInteractivos) {
+            if (objeto.posicion.epsilonEquals(mapDef.keyX, mapDef.keyY, mapDef.keyZ, 0.001f)) {
+                objeto.activo = false;
+            }
+        }
+        if (entidadLlave != null) {
+            ModelComponent modelo = Mappers.model.get(entidadLlave);
+            if (modelo != null) {
+                sceneManager.removeScene(modelo.scene);
+            }
+        }
+    }
+
+    /** Interaccion con la puerta de salida (pedido explicito del usuario 2026-08-10): sin llave,
+     * reproduce el sonido de forzar la puerta y muestra el mensaje temporal "Necesitas una llave"
+     * -- el jugador sigue jugando con normalidad, nada mas cambia. Con llave, dispara exactamente
+     * la misma secuencia de victoria que ya existia (EscapeVictoryScreen). */
+    private void interactuarConPuertaSalida() {
+        if (escapado) {
+            return;
+        }
+        if (tieneLlave) {
+            escapado = true;
+            EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
+            game.setScreen(victoria);
+            dispose();
+        } else {
+            sonidoForzandoPuerta.play();
+            mensajeLlaveTiempoRestante = MENSAJE_LLAVE_DURACION;
+        }
+    }
+
+    /** Crosshair pequeño y discreto (pedido explicito del usuario 2026-08-10) -- un punto en el
+     * centro de la pantalla, ligeramente mas grande/opaco cuando hay un objetivo interactuable
+     * real delante (ver actualizarInteraccion), nunca un HUD invasivo. */
+    private void dibujarCrosshair() {
+        float cx = Gdx.graphics.getWidth() / 2f;
+        float cy = Gdx.graphics.getHeight() / 2f;
+        boolean activo = objetivoInteractivoActual != null;
+
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(1f, 1f, 1f, activo ? 0.95f : 0.55f);
+        uiShapes.circle(cx, cy, activo ? CROSSHAIR_RADIO_ACTIVO : CROSSHAIR_RADIO_NORMAL);
+        uiShapes.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    /** Mensaje temporal "Necesitas una llave"/"You need a key" -- se desvanece solo tras
+     * MENSAJE_LLAVE_DURACION segundos, el jugador nunca queda bloqueado ni pierde control. */
+    private void dibujarMensajeLlave(float dt) {
+        if (mensajeLlaveTiempoRestante <= 0f) {
+            return;
+        }
+        mensajeLlaveTiempoRestante = Math.max(0f, mensajeLlaveTiempoRestante - dt);
+
+        String texto = Lang.get(handoff.idioma, "key.need");
+        GlyphLayout layout = new GlyphLayout(uiFont, texto);
+        float x = Gdx.graphics.getWidth() / 2f - layout.width / 2f;
+        float y = Gdx.graphics.getHeight() * 0.28f;
+
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiBatch.begin();
+        uiFont.draw(uiBatch, layout, x, y);
+        uiBatch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
     @Override
     public void render(float delta) {
         float dt = Math.min(delta, MAX_FRAME_DELTA);
@@ -783,7 +1067,17 @@ public class GameplayScreen implements Screen {
         // una pared, el bob se ralentiza junto con el movimiento real en vez de seguir a
         // velocidad constante como si nada lo hubiera bloqueado.
         float distanciaMovidaEsteFrame = playerTransform.position.dst(resolved);
-        playerTransform.position.set(resolved);
+        playerTransform.position.x = resolved.x;
+        playerTransform.position.z = resolved.z;
+
+        // Escalon del stage (pedido explicito del usuario 2026-08-10): la altura de ojos sube/baja
+        // suavemente sobre la base mapDef.playerStartY segun la zona XZ real -- ver
+        // CollisionWorld.alturaEscalonEn/aplicarSuavizadoAltura. Nunca bloquea el movimiento en si
+        // (ya resuelto arriba), solo ajusta la altura para que se sienta como subir un escalon real
+        // en vez de atravesarlo en linea recta a la misma altura.
+        float alturaEscalonObjetivo = mapDef.playerStartY
+                + collisionWorld.alturaEscalonEn(playerTransform.position.x, playerTransform.position.z);
+        playerTransform.position.y = CollisionWorld.aplicarSuavizadoAltura(playerTransform.position.y, alturaEscalonObjetivo, dt);
 
         cameraController.actualizarBob(dt, distanciaMovidaEsteFrame);
         cameraController.applyToCamera(playerTransform.position);
@@ -799,12 +1093,14 @@ public class GameplayScreen implements Screen {
 
         actualizarLatidosYVineta(playerTransform.position);
         actualizarMusicaEspacialFreddy();
+        // Ya no hay disparo automatico por proximidad -- la puerta de salida ahora es un
+        // ObjetoInteractivo mas (pedido explicito del usuario 2026-08-10), ver
+        // interactuarConPuertaSalida(). actualizarInteraccion() tambien maneja la llave.
+        actualizarInteraccion();
+        dibujarCrosshair();
+        dibujarMensajeLlave(dt);
 
         dibujarAyudaInicial(dt);
-
-        float dxSalida = playerTransform.position.x - exitX;
-        float dzSalida = playerTransform.position.z - exitZ;
-        boolean llegoALaSalida = (dxSalida * dxSalida + dzSalida * dzSalida) <= exitRadius * exitRadius;
 
         AIComponent guardiaAtrapante = null;
         for (AIComponent ai : guardias) {
@@ -813,13 +1109,7 @@ public class GameplayScreen implements Screen {
                 break;
             }
         }
-
-        if (llegoALaSalida && !escapado) {
-            escapado = true;
-            EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
-            game.setScreen(victoria);
-            dispose();
-        } else if (guardiaAtrapante != null) {
+        if (guardiaAtrapante != null) {
             iniciarJumpscare(guardiaAtrapante);
         }
     }
@@ -1270,6 +1560,7 @@ public class GameplayScreen implements Screen {
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.move"), x + 18f, yDibujo + AYUDA_ALTO - 48f);
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.look"), x + 18f, yDibujo + AYUDA_ALTO - 74f);
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.flashlight"), x + 18f, yDibujo + AYUDA_ALTO - 100f);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.interact"), x + 18f, yDibujo + AYUDA_ALTO - 126f);
         uiFont.setColor(Color.WHITE);
         uiBatch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
@@ -1394,6 +1685,10 @@ public class GameplayScreen implements Screen {
         }
         texturaCorazonLleno.dispose();
         texturaCorazonVacio.dispose();
+        texturaSangre.dispose();
+        for (Model modelo : modelosDecalSangre) {
+            modelo.dispose();
+        }
         detenerLatidos();
         if (idSonidoMusicaFreddy != -1) {
             sonidoMusicaFreddy.stop(idSonidoMusicaFreddy);

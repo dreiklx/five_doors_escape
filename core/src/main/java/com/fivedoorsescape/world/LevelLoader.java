@@ -84,6 +84,29 @@ public class LevelLoader {
      */
     private static final float BOUNDARY_WALL_THICKNESS = 1.5f;
 
+    /**
+     * Area de huella (X*Z, unidades de mundo al cuadrado) a partir de la cual un nodo NO
+     * degenerado (no "spansWholeFootprint", ver arriba) igual se subdivide por triangulos reales
+     * en vez de usar su bounding box completa como un unico collider. Hallazgo real jugando
+     * (sesion 2026-08-10, "no puedo caminar entre las mesas del comedor"): el modelador fusiono
+     * TODAS las mesas del comedor (y sus sillas, y los manteles) en un solo nodo/mesh cada uno
+     * (p.ej. "mesas_32" -> "Object_28", un unico mesh de ~8x6.5 unidades que cubre TODA la zona de
+     * mesas) -- exactamente el mismo problema estructural que ya se resolvio para las paredes
+     * (§ DEGENERATE_FOOTPRINT_FRACTION), pero a escala de una habitacion en vez de todo el
+     * edificio, asi que nunca disparaba ese umbral (pensado para paredes que cubren >=70% del
+     * edificio). Una sola caja de colision ahi bloquea el area completa, incluidos los pasillos
+     * reales entre mesas. Confirmado midiendo el glTF real: el mesh fusionado de mesas mide
+     * 8.17x6.552 (~53.5 m^2); el objeto individual mas grande fuera de ese patron de fusion
+     * (un mueble de servicio real, "MesaPartAndService_35") mide 1.268x2.142 (~2.72 m^2) -- este
+     * umbral queda comodamente entre ambos, asi que solo dispara para grupos fusionados reales,
+     * no para muebles individuales legitimos. Subdividir un objeto que en realidad SI es solido y
+     * continuo en toda su huella (p.ej. el stage, ver stageMinX/etc. en MapDefinition) no cambia
+     * el resultado de colision -- solo reemplaza una caja grande por muchas cajas pequeñas que
+     * cubren exactamente la misma geometria real, asi que aplicar este umbral de forma general
+     * (sin depender del nombre del nodo) es seguro.
+     */
+    private static final float FURNITURE_GROUP_MAX_FOOTPRINT_AREA = 5.0f;
+
     private final ContentRegistry registry;
     private final AssetService assets;
 
@@ -356,10 +379,20 @@ public class LevelLoader {
             short[] indices = new short[meshPart.size];
             mesh.getIndices(meshPart.offset, meshPart.size, indices, 0);
 
+            // indices[i] es short (Java lo interpreta como con signo, rango -32768..32767) pero
+            // representa un indice de vertice SIN signo (GL_UNSIGNED_SHORT, rango 0..65535) --
+            // bug real encontrado al aplicar subdivideNode a mallas de mobiliario fusionado
+            // (ver FURNITURE_GROUP_MAX_FOOTPRINT_AREA): las sillas del comedor, tras el split
+            // automatico de gdx-gltf por el limite de 16 bits, generan sub-mallas de EXACTAMENTE
+            // 65535 vertices -- cualquier indice >= 32768 se leia como negativo sin la mascara
+            // "& 0xFFFF", produciendo un acceso fuera de rango real
+            // (ArrayIndexOutOfBoundsException) en vez de silenciosamente mal-triangular. Las
+            // paredes (unico llamador de subdivideNode antes de esta sesion) nunca disparaban
+            // esto por pura coincidencia de tamano de sus sub-mallas.
             for (int i = 0; i + 2 < indices.length; i += 3) {
-                leerVertice(vertices, indices[i], vertexSizeFloats, posOffsetFloats, v0).mul(nodeWorldTransform);
-                leerVertice(vertices, indices[i + 1], vertexSizeFloats, posOffsetFloats, v1).mul(nodeWorldTransform);
-                leerVertice(vertices, indices[i + 2], vertexSizeFloats, posOffsetFloats, v2).mul(nodeWorldTransform);
+                leerVertice(vertices, indices[i] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v0).mul(nodeWorldTransform);
+                leerVertice(vertices, indices[i + 1] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v1).mul(nodeWorldTransform);
+                leerVertice(vertices, indices[i + 2] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v2).mul(nodeWorldTransform);
                 rasterizarTriangulo(v0, v1, v2, celdas);
             }
         }
@@ -381,7 +414,7 @@ public class LevelLoader {
         }
     }
 
-    private Vector3 leerVertice(float[] vertices, short indice, int vertexSizeFloats, int posOffsetFloats, Vector3 out) {
+    private Vector3 leerVertice(float[] vertices, int indice, int vertexSizeFloats, int posOffsetFloats, Vector3 out) {
         int base = indice * vertexSizeFloats + posOffsetFloats;
         return out.set(vertices[base], vertices[base + 1], vertices[base + 2]);
     }
@@ -506,13 +539,32 @@ public class LevelLoader {
                         && dims.z < COLLIDER_MIN_DIMENSION;
                 boolean spansWholeFootprint = dims.x >= mapDims.x * DEGENERATE_FOOTPRINT_FRACTION
                         && dims.z >= mapDims.z * DEGENERATE_FOOTPRINT_FRACTION;
+                // Grupo de mobiliario fusionado (mesas/sillas/manteles del comedor, ver comentario
+                // de FURNITURE_GROUP_MAX_FOOTPRINT_AREA) -- deliberadamente excluye lo que ya es
+                // spansWholeFootprint (ese caso, el piso, se sigue gestionando solo por
+                // WALL_MIN_HEIGHT como antes).
+                boolean grupoMobiliarioFusionado = !spansWholeFootprint
+                        && (dims.x * dims.z) > FURNITURE_GROUP_MAX_FOOTPRINT_AREA;
                 boolean enZonaPuerta = dentroDeZonaPuerta(nodeBox, puertaZonas)
                         || dentroDeZonaPuerta(nodeBox, pisosDecorativosSinColision);
-                if (!tooSmall && !spansWholeFootprint && !enZonaPuerta) {
+                if (!tooSmall && !spansWholeFootprint && !grupoMobiliarioFusionado && !enZonaPuerta) {
                     collisionWorld.addStaticCollider(nodeBox);
                 } else if (spansWholeFootprint && dims.y >= WALL_MIN_HEIGHT) {
                     // Solo puertaZonas (nunca pisosDecorativosSinColision) despeja celdas de
-                    // pared subdividida -- ver comentario de esPisoDecorativoPirateCove.
+                    // pared subdividida -- ver comentario de esPisoDecorativoPirateCove. Seguro
+                    // aqui porque las paredes (altura completa) nunca comparten huella real con la
+                    // tarima de Pirate Cove (altura de piso, ~0.42) en la practica.
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
+                } else if (grupoMobiliarioFusionado && !enZonaPuerta) {
+                    // A diferencia del caso de arriba, aqui SI hace falta el chequeo de
+                    // enZonaPuerta (incluye pisosDecorativosSinColision) -- bug real encontrado en
+                    // pruebas (sesion 2026-08-10): los propios fragmentos de "base_39" (tarima de
+                    // Pirate Cove) miden hasta 9.6 m^2 de huella, asi que tambien calificaban como
+                    // "grupo de mobiliario fusionado" -- sin este chequeo, subdivideNode
+                    // triangulaba la tarima misma y generaba colliders solidos de piso ahi (el
+                    // spawn de Foxy, a Y=0 dentro de esa zona, quedaba incrustado). subdivideNode
+                    // solo filtra por puertaZonas internamente (nunca pisosDecorativosSinColision),
+                    // asi que la exclusion debe aplicarse aqui, antes de llamarlo.
                     subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
                 }
             }

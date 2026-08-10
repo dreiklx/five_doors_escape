@@ -1,0 +1,8 @@
+{
+    "id": "llave",
+    "modelPath": "models/Llave.glb",
+    "scale": 0.0106,
+    "rotationXDegrees": 0.0,
+    "animaciones": {},
+    "aiControlled": false
+}

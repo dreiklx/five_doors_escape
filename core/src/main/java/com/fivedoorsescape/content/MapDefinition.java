@@ -34,4 +34,22 @@ public class MapDefinition {
     public float chicaStartZ = 0f;
     public float foxyStartX = 0f;
     public float foxyStartZ = 0f;
+
+    /** Huella (X/Z) y altura del "stage" -- pedido explicito del usuario 2026-08-10: se debe
+     * poder subir el pequeño escalon de forma natural (elevacion suave de la posicion, nunca un
+     * bloqueo de colision) tanto el jugador como cualquier animatronico que camine sobre el.
+     * stageHeight=0 (valor por defecto) desactiva el escalon por completo -- ver
+     * CollisionWorld.configurarEscalon/alturaEscalonEn. */
+    public float stageMinX = 0f;
+    public float stageMaxX = 0f;
+    public float stageMinZ = 0f;
+    public float stageMaxZ = 0f;
+    public float stageHeight = 0f;
+
+    /** Posicion + orientacion de la llave en la cocina (pedido explicito del usuario 2026-08-10),
+     * sobre una superficie real (mueble de cocina), no flotando. */
+    public float keyX = 0f;
+    public float keyY = 0f;
+    public float keyZ = 0f;
+    public float keyYawDegrees = 0f;
 }

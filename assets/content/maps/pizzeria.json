@@ -17,5 +17,14 @@
     "chicaStartX": 5.0,
     "chicaStartZ": 1.0,
     "foxyStartX": -10.7,
-    "foxyStartZ": -0.5
+    "foxyStartZ": -0.5,
+    "stageMinX": -3.7,
+    "stageMaxX": 3.5,
+    "stageMinZ": -9.4,
+    "stageMaxZ": -7.0,
+    "stageHeight": 0.56,
+    "keyX": 10.7955,
+    "keyY": 0.762,
+    "keyZ": 6.2545,
+    "keyYawDegrees": 25.0
 }

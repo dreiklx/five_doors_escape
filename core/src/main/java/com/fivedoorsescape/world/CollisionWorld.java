@@ -19,6 +19,52 @@ public class CollisionWorld {
     private final Array<BoundingBox> collidersSoloJugador = new Array<>();
     private final BoundingBox tmpEntityBox = new BoundingBox();
 
+    // "Escalon" del stage (pedido explicito del usuario 2026-08-10): una zona rectangular XZ
+    // donde la altura de "suelo" real es mayor que la base (0), para que el jugador y los
+    // animatronicos SUBAN de forma suave al entrar ahi, en vez de simplemente pasar por encima sin
+    // cambiar de altura (que es lo que ya ocurria, ya que el stage no tiene colision de bloqueo --
+    // su collider real, tan bajo, nunca llega a solaparse en Y con la caja de colision de ningun
+    // personaje). Esto es puramente una ayuda de POSICIONAMIENTO (altura Y objetivo), nunca de
+    // colision/bloqueo -- nunca impide entrar ni salir de la zona.
+    private float pasoMinX, pasoMaxX, pasoMinZ, pasoMaxZ, pasoAltura;
+
+    /** Velocidad maxima (unidades/segundo) a la que la altura de un personaje puede subir/bajar
+     * hacia el objetivo de alturaEscalonEn -- evita un salto instantaneo de altura (teletransporte
+     * vertical) al cruzar el borde del stage, pedido explicito del usuario ("sin teletransportes
+     * ni saltos bruscos"). Con stageHeight=0.56 (valor real de pizzeria.json), subir el escalon
+     * completo toma ~0.28s -- rapido pero perceptible, no instantaneo. */
+    public static final float VELOCIDAD_ESCALON = 2.0f;
+
+    public void configurarEscalon(float minX, float maxX, float minZ, float maxZ, float altura) {
+        this.pasoMinX = minX;
+        this.pasoMaxX = maxX;
+        this.pasoMinZ = minZ;
+        this.pasoMaxZ = maxZ;
+        this.pasoAltura = altura;
+    }
+
+    /** Altura de "suelo" objetivo (offset sobre la base 0) en la posicion XZ dada -- pasoAltura si
+     * cae dentro de la zona configurada, 0 en cualquier otro punto del mapa. */
+    public float alturaEscalonEn(float x, float z) {
+        if (pasoAltura != 0f && x >= pasoMinX && x <= pasoMaxX && z >= pasoMinZ && z <= pasoMaxZ) {
+            return pasoAltura;
+        }
+        return 0f;
+    }
+
+    /** Mueve "actual" hacia "objetivo" a velocidad maxima VELOCIDAD_ESCALON -- utilidad compartida
+     * por GameplayScreen (jugador) y AISystem (los 4 animatronicos), para que ambos suban/bajen el
+     * escalon exactamente igual de suave. */
+    public static float aplicarSuavizadoAltura(float actual, float objetivo, float dt) {
+        float maxPaso = VELOCIDAD_ESCALON * dt;
+        if (actual < objetivo) {
+            return Math.min(objetivo, actual + maxPaso);
+        } else if (actual > objetivo) {
+            return Math.max(objetivo, actual - maxPaso);
+        }
+        return actual;
+    }
+
     public void addStaticCollider(BoundingBox box) {
         staticColliders.add(box);
     }
