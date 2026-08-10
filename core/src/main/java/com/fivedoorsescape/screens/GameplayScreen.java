@@ -778,8 +778,14 @@ public class GameplayScreen implements Screen {
 
         CollisionComponent playerCollision = Mappers.collision.get(playerEntity);
         Vector3 resolved = collisionWorld.resolveMovement(playerTransform.position, desiredDelta, playerCollision.halfExtents, true);
+        // Distancia REAL recorrida este frame (post-colision, no el input crudo) -- ver
+        // FirstPersonCameraController.actualizarBob(): si el jugador queda deslizandose contra
+        // una pared, el bob se ralentiza junto con el movimiento real en vez de seguir a
+        // velocidad constante como si nada lo hubiera bloqueado.
+        float distanciaMovidaEsteFrame = playerTransform.position.dst(resolved);
         playerTransform.position.set(resolved);
 
+        cameraController.actualizarBob(dt, distanciaMovidaEsteFrame);
         cameraController.applyToCamera(playerTransform.position);
         linternaJugador.position.set(camera.position);
         linternaJugador.direction.set(camera.direction);
