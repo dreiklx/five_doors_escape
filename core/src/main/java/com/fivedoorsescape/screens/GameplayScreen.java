@@ -630,6 +630,40 @@ public class GameplayScreen implements Screen {
     }
 
     /**
+     * Pausa/reanuda la reproduccion REAL (no solo el volumen ni el estado visual) de los unicos
+     * sonidos verdaderamente continuos de la partida -- la musica espacial de Freddy
+     * (sonidoMusicaFreddy, en loop() desde show(), nunca se detiene durante toda la sesion) y el
+     * latido activo en ese instante, si habia alguno sonando. Sound.pause(id)/resume(id) son los
+     * metodos reales de libGDX para esto (respaldados por alSourcePause/alSourcePlay de OpenAL en
+     * desktop) -- conservan la posicion de reproduccion real, no reinician desde el principio ni
+     * afectan otras instancias de la misma Sound. El resto de los sonidos del juego (jumpscare,
+     * estatica, risa de Freddy, narracion de la cinematica, click de linterna) nunca pueden estar
+     * sonando mientras pausado==true: sus estados (JUMPSCARE, ESTATICA, CINEMATICA_INICIAL, etc.)
+     * retornan en el switch de arriba antes de llegar siquiera al chequeo de ESC, así que no
+     * necesitan tratamiento aquí -- pausar/reanudar solo estos dos evita tocar nada que no haga
+     * falta.
+     */
+    private void pausarAudioContinuo() {
+        if (idSonidoMusicaFreddy != -1) {
+            sonidoMusicaFreddy.pause(idSonidoMusicaFreddy);
+        }
+        if (idSonidoLatidoActivo != -1) {
+            Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
+            sonidoActivo.pause(idSonidoLatidoActivo);
+        }
+    }
+
+    private void reanudarAudioContinuo() {
+        if (idSonidoMusicaFreddy != -1) {
+            sonidoMusicaFreddy.resume(idSonidoMusicaFreddy);
+        }
+        if (idSonidoLatidoActivo != -1) {
+            Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
+            sonidoActivo.resume(idSonidoLatidoActivo);
+        }
+    }
+
+    /**
      * "Caja musical" de Freddy (pedido explicito del usuario 2026-08-06): actualiza volumen y pan
      * de la unica instancia de sonidoMusicaFreddy (ya en loop desde show(), nunca se reinicia)
      * segun la posicion real de Freddy respecto a la camara -- mas cerca = mas fuerte, y el pan
@@ -711,6 +745,11 @@ public class GameplayScreen implements Screen {
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             pausado = !pausado;
             Gdx.input.setCursorCatched(!pausado);
+            if (pausado) {
+                pausarAudioContinuo();
+            } else {
+                reanudarAudioContinuo();
+            }
         }
 
         if (pausado) {
