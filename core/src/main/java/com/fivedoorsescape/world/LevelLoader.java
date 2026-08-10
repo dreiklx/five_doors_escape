@@ -107,6 +107,26 @@ public class LevelLoader {
      */
     private static final float FURNITURE_GROUP_MAX_FOOTPRINT_AREA = 5.0f;
 
+    /**
+     * Erosion horizontal (X/Z) aplicada a cada collider generado por la subdivision de mobiliario
+     * fusionado (nunca a la subdivision de paredes, que recibe margenErosion=0). Hallazgo real
+     * jugando esta misma sesion tras el fix de arriba: los huecos reales entre mesas/sillas SI
+     * quedaron transitables (confirmado con una grilla real, 140 celdas libres), pero medir el
+     * ancho real de esos pasillos (barrido fino en X a varias alturas de Z) dio un resultado
+     * incomodo -- la mayoria de los cortes muestran corredores de EXACTAMENTE 0.60 unidades, el
+     * mismo ancho total de la caja de colision del jugador (halfExtents.x=0.3, 0.6 de ancho) -- es
+     * decir, technically transitable pero sin ningun margen real, obligando a centrarse con
+     * precision de pixel para no quedar "atascado" contra una silla. Un jugador real (o un
+     * animatronico persiguiendolo) rara vez camina perfectamente centrado. Esta erosion reduce
+     * cada collider de mobiliario 0.1 unidades por lado (0.2 unidades de ancho total ganado por
+     * pasillo), llevando esos corredores de ~0.60 a ~0.80 unidades -- suficiente margen real sin
+     * dejar de bloquear el mueble en si (las mesas/sillas siguen siendo solidas, solo con una caja
+     * de colision ligeramente mas generosa que su malla visual exacta, practica estandar en
+     * videojuegos). No se aplica a paredes (necesitan precision real para no filtrar huecos donde
+     * no los hay) ni cambia la altura (Y) de ningun collider.
+     */
+    private static final float FURNITURE_COLLIDER_EROSION = 0.1f;
+
     private final ContentRegistry registry;
     private final AssetService assets;
 
@@ -355,7 +375,7 @@ public class LevelLoader {
      * recupera colision solida donde realmente hay pared.
      */
     private void subdivideNode(Node node, Matrix4 instanceTransform, CollisionWorld collisionWorld,
-            Array<BoundingBox> puertaZonas) {
+            Array<BoundingBox> puertaZonas, float margenErosion) {
         Matrix4 nodeWorldTransform = new Matrix4(instanceTransform).mul(node.globalTransform);
         LongMap<CeldaAcumulador> celdas = new LongMap<>();
 
@@ -405,8 +425,22 @@ public class LevelLoader {
             if (dimX < WALL_CELL_MIN_DIMENSION && dimY < WALL_CELL_MIN_DIMENSION && dimZ < WALL_CELL_MIN_DIMENSION) {
                 continue;
             }
+            // Erosion horizontal (X/Z, nunca Y -- la altura real de la mesa/silla debe quedar
+            // intacta) para mobiliario fusionado -- ver comentario de FURNITURE_COLLIDER_EROSION.
+            // margenErosion=0 para paredes (sin cambio de comportamiento ahi).
+            float minX = c.minX + margenErosion;
+            float maxX = c.maxX - margenErosion;
+            float minZ = c.minZ + margenErosion;
+            float maxZ = c.maxZ - margenErosion;
+            if (maxX <= minX || maxZ <= minZ) {
+                // La celda entera era mas angosta que el margen de erosion en algun eje (p.ej.
+                // una pata de silla delgada) -- se descarta en vez de generar una caja invertida
+                // o de grosor negativo. Preferible perder un collider diminuto (ya cubierto en la
+                // practica por celdas vecinas de la misma mesa/silla) a corromper la geometria.
+                continue;
+            }
             BoundingBox celdaBox = new BoundingBox(
-                    new Vector3(c.minX, c.minY, c.minZ), new Vector3(c.maxX, c.maxY, c.maxZ));
+                    new Vector3(minX, c.minY, minZ), new Vector3(maxX, c.maxY, maxZ));
             if (dentroDeZonaPuerta(celdaBox, puertaZonas)) {
                 continue;
             }
@@ -554,7 +588,7 @@ public class LevelLoader {
                     // pared subdividida -- ver comentario de esPisoDecorativoPirateCove. Seguro
                     // aqui porque las paredes (altura completa) nunca comparten huella real con la
                     // tarima de Pirate Cove (altura de piso, ~0.42) en la practica.
-                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, 0f);
                 } else if (grupoMobiliarioFusionado && !enZonaPuerta) {
                     // A diferencia del caso de arriba, aqui SI hace falta el chequeo de
                     // enZonaPuerta (incluye pisosDecorativosSinColision) -- bug real encontrado en
@@ -565,7 +599,7 @@ public class LevelLoader {
                     // spawn de Foxy, a Y=0 dentro de esa zona, quedaba incrustado). subdivideNode
                     // solo filtra por puertaZonas internamente (nunca pisosDecorativosSinColision),
                     // asi que la exclusion debe aplicarse aqui, antes de llamarlo.
-                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas);
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, FURNITURE_COLLIDER_EROSION);
                 }
             }
         }
