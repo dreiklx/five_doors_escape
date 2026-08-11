@@ -23,8 +23,11 @@
     "stageMinZ": -9.4,
     "stageMaxZ": -7.0,
     "stageHeight": 0.56,
-    "keyX": 10.7955,
+    "keyX": 10.8755,
     "keyY": 0.762,
     "keyZ": 6.2545,
-    "keyYawDegrees": 25.0
+    "keyYawDegrees": 25.0,
+    "goldenFreddyX": 10.25,
+    "goldenFreddyZ": -4.75,
+    "goldenFreddyYawDegrees": 0.0
 }

@@ -42,7 +42,7 @@ public class BootScreen implements Screen {
 
         MapDefinition mapDef = registry.getMapDefinition("pizzeria");
         assets.queueModel(mapDef.modelPath);
-        for (String entityId : new String[] {"freddy", "bonnie", "chica", "foxy", "llave"}) {
+        for (String entityId : new String[] {"freddy", "bonnie", "chica", "foxy", "llave", "golden_freddy"}) {
             EntityDefinition def = registry.getEntityDefinition(entityId);
             assets.queueModel(def.modelPath);
         }
@@ -60,6 +60,10 @@ public class BootScreen implements Screen {
         assets.queueSound(GameplayScreen.SONIDO_MUSICA_FREDDY);
         assets.queueSound(GameplayScreen.SONIDO_FORZANDO_PUERTA);
         assets.queueSound(GameplayScreen.SONIDO_AGARRANDO_OBJETO);
+        assets.queueSound(GameplayScreen.SONIDO_GLITCH_GRAVE);
+        assets.queueSound(GameplayScreen.SONIDO_XSCREAM2);
+        assets.queueSound(GameplayScreen.SONIDO_ROBOTVOICE);
+        assets.queueSound(GameplayScreen.SONIDO_RESPIRACION_AGITADA);
         assets.queueSound(GameplayScreen.rutaAudioEscape(handoff.idioma));
     }
 

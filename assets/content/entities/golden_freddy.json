@@ -1,0 +1,8 @@
+{
+    "id": "golden_freddy",
+    "modelPath": "models/GoldenFreddy.glb",
+    "scale": 0.018,
+    "rotationXDegrees": 0.0,
+    "animaciones": {},
+    "aiControlled": false
+}

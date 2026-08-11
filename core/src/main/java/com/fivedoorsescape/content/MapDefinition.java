@@ -52,4 +52,10 @@ public class MapDefinition {
     public float keyY = 0f;
     public float keyZ = 0f;
     public float keyYawDegrees = 0f;
+
+    /** Posicion + orientacion de Golden Freddy, sentado dentro del bano al final del pasillo
+     * (pedido explicito del usuario 2026-08-10) -- estatico, sin IA de movimiento. */
+    public float goldenFreddyX = 0f;
+    public float goldenFreddyZ = 0f;
+    public float goldenFreddyYawDegrees = 0f;
 }

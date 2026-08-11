@@ -28,6 +28,7 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
@@ -59,6 +60,7 @@ import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRTextureAttribute;
 import net.mgsx.gltf.scene3d.lights.DirectionalLightEx;
 import net.mgsx.gltf.scene3d.lights.DirectionalShadowLight;
+import net.mgsx.gltf.scene3d.lights.PointLightEx;
 import net.mgsx.gltf.scene3d.lights.SpotLightEx;
 import net.mgsx.gltf.scene3d.scene.Scene;
 import net.mgsx.gltf.scene3d.scene.SceneManager;
@@ -87,6 +89,8 @@ public class GameplayScreen implements Screen {
      * CTRL en el bucle JUGANDO mas abajo (pedido explicito del usuario 2026-08-05: poder
      * apagarla con CTRL, con un clic de sonido al cambiar de estado). */
     private static final float LINTERNA_INTENSIDAD_ENCENDIDA = 18f;
+    /** Brillo sutil de la llave (pedido explicito del usuario 2026-08-10) -- ver luzLlave mas abajo. */
+    private static final float LUZ_LLAVE_INTENSIDAD = 0.55f;
 
     // Panel de ayuda de controles (pedido explicito del usuario 2026-08-05, reemplaza al viejo
     // boton de salida de la esquina superior izquierda -- ese boton "realmente no servia porque
@@ -153,6 +157,22 @@ public class GameplayScreen implements Screen {
     public static final String SONIDO_ESCAPE_ES = "sounds/escape_es.wav";
     public static final String SONIDO_ESCAPE_EN = "sounds/escape_en.wav";
 
+    /** Golden Freddy (pedido explicito del usuario 2026-08-10) -- reutilizado de FDAF assets, con
+     * cuidado de usar los archivos correctos: GlitchGrave.wav (raiz de FDAF assets, distinto de
+     * GlitchSound.wav, ya usado para otra cosa), XSCREAM2.wav (distinto de XSCREAM.wav), y el
+     * robotvoice.wav ya presente en FDAF assets/FDAF Sounds. Los 3 se cargan UNA vez en show()
+     * (mismo patron que el resto de sonidos de esta pantalla) y se reutilizan via play()/loop()
+     * -- nunca se crea un nuevo Sound por frame ni por entrada al rango. */
+    public static final String SONIDO_GLITCH_GRAVE = "sounds/glitch_grave.wav";
+    public static final String SONIDO_XSCREAM2 = "sounds/xscream2.wav";
+    public static final String SONIDO_ROBOTVOICE = "sounds/robotvoice.wav";
+    /** Respiracion agitada -- reutilizada del proyecto Swing (mismo archivo real que usa
+     * ControllerInterfaz.respiracion, "varios/respiracion_agitada.wav"), copiada a este proyecto
+     * porque Escape nunca tuvo su propio sonido de respiracion hasta ahora (pedido explicito del
+     * usuario: "reproduce el sonido de respiración agitada ya existente en Escape" -- referencia
+     * conceptual al mismo recurso del juego, no un archivo que ya viviera aqui). */
+    public static final String SONIDO_RESPIRACION_AGITADA = "sounds/respiracion_agitada.wav";
+
     /** Unico punto de resolucion idioma->archivo para la narracion de Escape -- BootScreen (al
      * encolar) y GameplayScreen.show() (al reproducir) llaman a este mismo metodo, para que la
      * logica de que archivo corresponde a que idioma exista en un solo lugar. */
@@ -165,6 +185,10 @@ public class GameplayScreen implements Screen {
      * decodifica con GifDecoder (javax.imageio, sin dependencias nuevas), no con una libreria de
      * GIF animado que libGDX no trae de forma nativa. */
     private static final String GIF_ESTATICA = "gifs/Static.gif";
+    /** GIF real "IT'S ME" de FDAF assets (pedido explicito del usuario 2026-08-11, reemplaza el
+     * texto disperso generado por procedimiento que se habia usado antes para la fase ITSME de
+     * Golden Freddy -- mismo patron de reutilizacion ya aprobado que Static.gif). */
+    private static final String GIF_ITSME = "gifs/ItsMe.gif";
 
     /** Duracion de cada tramo de la secuencia de atrapada y de la intro (mecanica de 2 vidas). */
     private static final float DURACION_JUMPSCARE = 1f;
@@ -210,7 +234,25 @@ public class GameplayScreen implements Screen {
     private static final float JUMPSCARE_ALTURA_FOCO = 1.5f;
     private static final float JUMPSCARE_DISTANCIA_BASE = 0.75f;
 
-    private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA, CORAZONES_RESPAWN }
+    /** Golden Freddy (pedido explicito del usuario 2026-08-10) -- constantes de su secuencia
+     * especial. GOLDEN_FREDDY_JUMPSCARE (imagen+XSCREAM2, ~1s) -> GOLDEN_FREDDY_FADE (respiracion
+     * agitada + fundido de negro a la imagen normal) -> GOLDEN_FREDDY_ITSME (texto disperso
+     * "SOY YO"/"IT'S ME" + robotvoice, ~4s) -> vuelve a JUGANDO. La repeticion cada ~24s
+     * (GOLDEN_FREDDY_INTERVALO_REPETICION) SOLO repite la fase ITSME -- nunca el jumpscare
+     * completo, pedido explicito del usuario. Ninguna de las 3 fases llama engine.update(), asi
+     * que los 4 animatronicos quedan realmente congelados durante toda la secuencia (mismo patron
+     * ya usado por JUMPSCARE/ESTATICA/CINEMATICA_INICIAL). */
+    private static final float DURACION_GOLDEN_FREDDY_JUMPSCARE = 1f;
+    private static final float DURACION_GOLDEN_FREDDY_FADE = 1f;
+    private static final float DURACION_GOLDEN_FREDDY_ITSME = 4f;
+    private static final float GOLDEN_FREDDY_INTERVALO_REPETICION = 24f;
+    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 1f;
+    private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.5f, 0.95f, 0.5f);
+    private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
+    private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
+
+    private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
+        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, GOLDEN_FREDDY_FADE, GOLDEN_FREDDY_ITSME }
 
     private boolean pausado = false;
     /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
@@ -243,6 +285,7 @@ public class GameplayScreen implements Screen {
     private Texture brdfLUT;
     private SceneSkybox skybox;
     private SpotLightEx linternaJugador;
+    private PointLightEx luzLlave;
     private DirectionalShadowLight luzDireccional;
 
     private SpriteBatch uiBatch;
@@ -303,6 +346,11 @@ public class GameplayScreen implements Screen {
     private Array<Float> duracionesCuadroEstatica;
     private int indiceCuadroEstatica = 0;
     private float tiempoEnCuadroEstatica = 0f;
+
+    private Array<Texture> cuadrosItsMe;
+    private Array<Float> duracionesCuadroItsMe;
+    private int indiceCuadroItsMe = 0;
+    private float tiempoEnCuadroItsMe = 0f;
 
     private Texture texturaCorazonLleno;
     private Texture texturaCorazonVacio;
@@ -389,6 +437,7 @@ public class GameplayScreen implements Screen {
     private final Vector3 tmpInterseccion = new Vector3();
 
     private Entity entidadLlave;
+    private Entity entidadGoldenFreddy;
     private boolean tieneLlave = false;
     private Sound sonidoForzandoPuerta;
     private Sound sonidoAgarrandoObjeto;
@@ -401,6 +450,40 @@ public class GameplayScreen implements Screen {
 
     private Texture texturaSangre;
     private final Array<Model> modelosDecalSangre = new Array<>();
+
+    // ------------------------------------------------------------------
+    // Golden Freddy (pedido explicito del usuario 2026-08-10): sentado en el bano, sin IA de
+    // movimiento. Ver constantes DURACION_GOLDEN_FREDDY_*/GOLDEN_FREDDY_* mas arriba y los estados
+    // GOLDEN_FREDDY_JUMPSCARE/FADE/ITSME en EstadoPartida.
+    // ------------------------------------------------------------------
+    private com.badlogic.gdx.graphics.g3d.model.Node nodoCabezaGoldenFreddy;
+    private final Quaternion rotacionBaseCabezaGoldenFreddy = new Quaternion();
+    private boolean goldenFreddyDentroDeRango = false;
+    private float goldenFreddyHeadYawActual = 0f;
+    private float goldenFreddyHeadPitchActual = 0f;
+    private float goldenFreddyHeadRollActual = 0f;
+    private float goldenFreddyHeadTiempoHastaProximoCambio = 0f;
+    private Sound sonidoGlitchGrave;
+    private long idSonidoGlitchGraveActivo = -1;
+    private Sound sonidoXscream2;
+    private long idSonidoXscream2Activo = -1;
+    private Sound sonidoRobotvoice;
+    private long idSonidoRobotvoiceActivo = -1;
+    private Sound sonidoRespiracionAgitada;
+    private Texture texturaGoldenFreddyJumpscare;
+    private float tiempoEnEstadoGoldenFreddy = 0f;
+    /** true en cuanto el jumpscare especial de Golden Freddy ocurre por primera vez en esta
+     * partida -- habilita el timer de repeticion cada ~24s (solo de la fase ITSME, nunca del
+     * jumpscare completo, pedido explicito del usuario) y es el disparador que MUY IMPORTANTE:
+     * al perder una vida despues de esto, deshabilita a Golden Freddy por el resto de la partida
+     * (ver resolverFinDeAtrapada()/limpiarGoldenFreddyPorMuerte()). */
+    private boolean goldenFreddyJumpscareYaOcurrido = false;
+    /** MUY IMPORTANTE (pedido explicito del usuario 2026-08-10): una vez true, Golden Freddy deja
+     * de reaccionar a proximidad/interaccion/repeticion por el resto de esta partida -- solo una
+     * Escape completamente nueva (un proceso nuevo, ver arquitectura del proyecto) lo reactiva. */
+    private boolean goldenFreddyDeshabilitado = false;
+    private float goldenFreddyTiempoHastaProximoEfecto = -1f;
+    private final Quaternion tmpQuaternionGoldenFreddy = new Quaternion();
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -485,6 +568,29 @@ public class GameplayScreen implements Screen {
         interactivoPuerta.distanciaMaxima = exitRadius + PUERTA_MARGEN_DISTANCIA_INTERACCION;
         interactivoPuerta.accion = this::interactuarConPuertaSalida;
         objetosInteractivos.add(interactivoPuerta);
+
+        // Golden Freddy (pedido explicito del usuario 2026-08-10): sentado dentro del bano, al
+        // final del pasillo -- entidad estatica SIN AIComponent (golden_freddy.json tiene
+        // aiControlled=false, EntityFactory no le agrega AIComponent) -- nunca camina, nunca
+        // persigue, permanece sentado toda la partida. Collider real (addStaticCollider, no
+        // colisionSoloJugador) para que ni el jugador ni los otros 4 animatronicos puedan
+        // atravesar su cuerpo -- los otros guardias ya resuelven su propio movimiento contra
+        // collisionWorld (ChaseState), asi que este collider nuevo los afecta automaticamente sin
+        // ningun cambio adicional en su logica.
+        Vector3 goldenFreddyPos = new Vector3(mapDef.goldenFreddyX, 0f, mapDef.goldenFreddyZ);
+        entidadGoldenFreddy = factory.createEntity("golden_freddy", goldenFreddyPos, mapDef.goldenFreddyYawDegrees);
+        numBones = Math.max(numBones, assets.getModel(registry.getEntityDefinition("golden_freddy").modelPath).maxBones);
+        warnIfEmbedded("GoldenFreddy", goldenFreddyPos, GOLDEN_FREDDY_HALF_EXTENTS);
+        collisionWorld.addStaticCollider(new com.badlogic.gdx.math.collision.BoundingBox(
+                new Vector3(goldenFreddyPos.x - GOLDEN_FREDDY_HALF_EXTENTS.x, 0f, goldenFreddyPos.z - GOLDEN_FREDDY_HALF_EXTENTS.z),
+                new Vector3(goldenFreddyPos.x + GOLDEN_FREDDY_HALF_EXTENTS.x, GOLDEN_FREDDY_HALF_EXTENTS.y * 2f, goldenFreddyPos.z + GOLDEN_FREDDY_HALF_EXTENTS.z)));
+
+        ObjetoInteractivo interactivoGoldenFreddy = new ObjetoInteractivo();
+        interactivoGoldenFreddy.posicion.set(goldenFreddyPos.x, 1.1f, goldenFreddyPos.z);
+        interactivoGoldenFreddy.radio = GOLDEN_FREDDY_RADIO_INTERACCION;
+        interactivoGoldenFreddy.distanciaMaxima = GOLDEN_FREDDY_DISTANCIA_INTERACCION;
+        interactivoGoldenFreddy.accion = this::interactuarConGoldenFreddy;
+        objetosInteractivos.add(interactivoGoldenFreddy);
 
         // Config manual (no el atajo createDefault(int)) unicamente para habilitar numSpotLights:
         // por defecto (DefaultShader.Config heredado) vale 0 -- la linterna del jugador (SpotLightEx
@@ -576,6 +682,20 @@ public class GameplayScreen implements Screen {
         linternaJugador.range = 11f;
         sceneManager.environment.add(linternaJugador);
 
+        // Brillo sutil de la llave (pedido explicito del usuario 2026-08-10: "un efecto de brillo
+        // sutil, no una iluminacion exagerada, para que se vea mas facil"). PointLightEx omnidireccional
+        // de corto alcance, color calido/dorado, sin cono (a diferencia de la linterna, la llave brilla
+        // por si misma en todas direcciones como un objeto ligeramente luminoso). Intensidad/alcance
+        // moderados a proposito -- en AMBIENTE_JUGANDO=0.12 incluso un brillo discreto ya se nota. Se
+        // apaga (intensity=0, nunca se retira del environment) al recogerla y se reactiva si se pierde
+        // la llave al morir -- ver recogerLlave()/perderLlave().
+        luzLlave = new PointLightEx();
+        luzLlave.setColor(1f, 0.85f, 0.4f, 1f);
+        luzLlave.intensity = LUZ_LLAVE_INTENSIDAD;
+        luzLlave.range = 1.4f;
+        luzLlave.position.set(mapDef.keyX, mapDef.keyY + 0.05f, mapDef.keyZ);
+        sceneManager.environment.add(luzLlave);
+
         skybox = new SceneSkybox(environmentCubemap);
         sceneManager.setSkyBox(skybox);
 
@@ -599,6 +719,17 @@ public class GameplayScreen implements Screen {
         sonidoMusicaFreddy = assets.getSound(SONIDO_MUSICA_FREDDY);
         sonidoForzandoPuerta = assets.getSound(SONIDO_FORZANDO_PUERTA);
         sonidoAgarrandoObjeto = assets.getSound(SONIDO_AGARRANDO_OBJETO);
+        sonidoGlitchGrave = assets.getSound(SONIDO_GLITCH_GRAVE);
+        sonidoXscream2 = assets.getSound(SONIDO_XSCREAM2);
+        sonidoRobotvoice = assets.getSound(SONIDO_ROBOTVOICE);
+        sonidoRespiracionAgitada = assets.getSound(SONIDO_RESPIRACION_AGITADA);
+        texturaGoldenFreddyJumpscare = new Texture(Gdx.files.internal("textures/golden_freddy_jumpscare.png"));
+        nodoCabezaGoldenFreddy = Mappers.model.get(entidadGoldenFreddy).scene.modelInstance.getNode("bip_head_028", true);
+        if (nodoCabezaGoldenFreddy != null) {
+            rotacionBaseCabezaGoldenFreddy.set(nodoCabezaGoldenFreddy.rotation);
+        } else {
+            Gdx.app.log("GameplayScreen", "ADVERTENCIA: nodo de cabeza de Golden Freddy no encontrado.");
+        }
         // Arranca en loop UNA sola vez, en silencio -- el volumen/pan real se actualiza cada
         // frame en actualizarMusicaEspacialFreddy() segun la distancia/direccion real a Freddy.
         // Nunca se reinicia/vuelve a lanzar -- un unico Sound.loop() para toda la partida, como
@@ -620,6 +751,20 @@ public class GameplayScreen implements Screen {
             duracionesCuadroEstatica.add(cuadro.duracionSegundos);
         }
         Gdx.app.log("GameplayScreen", "GIF de estatica decodificado: " + cuadrosEstatica.size + " cuadros");
+
+        // GIF real "IT'S ME" (pedido explicito del usuario 2026-08-11) para la fase ITSME de
+        // Golden Freddy -- mismo patron exacto que el GIF de estatica de arriba (decodificado una
+        // sola vez, recorrido en bucle durante DURACION_GOLDEN_FREDDY_ITSME).
+        Array<GifDecoder.Cuadro> cuadrosItsMeDecodificados = GifDecoder.decodificar(Gdx.files.internal(GIF_ITSME));
+        cuadrosItsMe = new Array<>();
+        duracionesCuadroItsMe = new Array<>();
+        for (GifDecoder.Cuadro cuadro : cuadrosItsMeDecodificados) {
+            Texture textura = new Texture(cuadro.pixmap);
+            cuadro.pixmap.dispose();
+            cuadrosItsMe.add(textura);
+            duracionesCuadroItsMe.add(cuadro.duracionSegundos);
+        }
+        Gdx.app.log("GameplayScreen", "GIF de IT'S ME decodificado: " + cuadrosItsMe.size + " cuadros");
 
         // Narracion de la cinematica de Escape (pedido explicito del usuario 2026-08-05): se
         // carga el audio del idioma real de esta sesion (ver rutaAudioEscape) y se mide su
@@ -995,6 +1140,9 @@ public class GameplayScreen implements Screen {
                 sceneManager.removeScene(modelo.scene);
             }
         }
+        if (luzLlave != null) {
+            luzLlave.intensity = 0f;
+        }
     }
 
     /** Interaccion con la puerta de salida (pedido explicito del usuario 2026-08-10): sin llave,
@@ -1041,8 +1189,225 @@ public class GameplayScreen implements Screen {
                 sceneManager.addScene(modelo.scene);
             }
         }
+        if (luzLlave != null) {
+            luzLlave.intensity = LUZ_LLAVE_INTENSIDAD;
+        }
         mensajeLlaveTextoClave = "key.lost";
         mensajeLlaveTiempoRestante = MENSAJE_LLAVE_DURACION;
+    }
+
+    // ------------------------------------------------------------------
+    // Golden Freddy (pedido explicito del usuario 2026-08-10).
+    // ------------------------------------------------------------------
+
+    /** Llamado cada frame de JUGANDO normal (nunca durante los propios estados GOLDEN_FREDDY_*,
+     * que se manejan por separado en el switch de render()). Maneja proximidad (~1m), el loop de
+     * GlitchGrave, la cabeza erratica, y el timer de repeticion de la fase ITSME cada ~24s. */
+    private void actualizarGoldenFreddy(float dt, Vector3 posicionJugador) {
+        if (goldenFreddyDeshabilitado) {
+            return;
+        }
+
+        float dx = posicionJugador.x - mapDef.goldenFreddyX;
+        float dz = posicionJugador.z - mapDef.goldenFreddyZ;
+        boolean dentroDeRango = (dx * dx + dz * dz) <= GOLDEN_FREDDY_RANGO_PROXIMIDAD * GOLDEN_FREDDY_RANGO_PROXIMIDAD;
+
+        if (dentroDeRango && !goldenFreddyDentroDeRango) {
+            // Entrando en rango: un unico loop nuevo -- idSonidoGlitchGraveActivo siempre vuelve a
+            // -1 al salir de rango (abajo), asi que una reentrada rapida nunca puede arrancar un
+            // segundo loop encima de uno que ya seguia sonando.
+            idSonidoGlitchGraveActivo = sonidoGlitchGrave.loop(1f);
+        } else if (!dentroDeRango && goldenFreddyDentroDeRango && idSonidoGlitchGraveActivo != -1) {
+            sonidoGlitchGrave.stop(idSonidoGlitchGraveActivo);
+            idSonidoGlitchGraveActivo = -1;
+        }
+        goldenFreddyDentroDeRango = dentroDeRango;
+
+        actualizarCabezaGoldenFreddy(dt, dentroDeRango);
+
+        if (goldenFreddyJumpscareYaOcurrido && goldenFreddyTiempoHastaProximoEfecto > 0f) {
+            goldenFreddyTiempoHastaProximoEfecto -= dt;
+            if (goldenFreddyTiempoHastaProximoEfecto <= 0f) {
+                // Pedido explicito del usuario: SOLO se repite la fase ITSME (texto+robotvoice),
+                // nunca el jumpscare completo -- por eso esto llama directo a
+                // iniciarGoldenFreddyItsMe(), nunca a iniciarGoldenFreddyJumpscare().
+                iniciarGoldenFreddyItsMe();
+            }
+        }
+    }
+
+    /** Movimiento erratico de cabeza (pedido explicito del usuario: "NO circulos, NO sinusoidal,
+     * NO un patron repetitivo predecible... como si el cuello estuviera fallando"). Implementado
+     * como saltos discretos a un angulo aleatorio nuevo cada 0.05-0.22s (intervalo TAMBIEN
+     * aleatorio) -- un salto brusco entre poses fijas, nunca una interpolacion suave, es
+     * precisamente lo que hace que se sienta como una falla mecanica en vez de una animacion.
+     * Fuera de rango, vuelve a la pose neutral de inmediato (nunca queda "congelado a mitad de
+     * glitch") y no vuelve a tocarse hasta la proxima entrada en rango. */
+    private void actualizarCabezaGoldenFreddy(float dt, boolean dentroDeRango) {
+        if (nodoCabezaGoldenFreddy == null) {
+            return;
+        }
+        if (!dentroDeRango) {
+            if (goldenFreddyHeadYawActual != 0f || goldenFreddyHeadPitchActual != 0f || goldenFreddyHeadRollActual != 0f) {
+                goldenFreddyHeadYawActual = 0f;
+                goldenFreddyHeadPitchActual = 0f;
+                goldenFreddyHeadRollActual = 0f;
+                aplicarRotacionCabezaGoldenFreddy();
+            }
+            return;
+        }
+
+        goldenFreddyHeadTiempoHastaProximoCambio -= dt;
+        if (goldenFreddyHeadTiempoHastaProximoCambio <= 0f) {
+            goldenFreddyHeadYawActual = MathUtils.random(-22f, 22f);
+            goldenFreddyHeadPitchActual = MathUtils.random(-13f, 13f);
+            goldenFreddyHeadRollActual = MathUtils.random(-9f, 9f);
+            goldenFreddyHeadTiempoHastaProximoCambio = MathUtils.random(0.05f, 0.22f);
+            aplicarRotacionCabezaGoldenFreddy();
+        }
+    }
+
+    private void aplicarRotacionCabezaGoldenFreddy() {
+        tmpQuaternionGoldenFreddy.setEulerAngles(goldenFreddyHeadYawActual, goldenFreddyHeadPitchActual, goldenFreddyHeadRollActual);
+        nodoCabezaGoldenFreddy.rotation.set(rotacionBaseCabezaGoldenFreddy).mul(tmpQuaternionGoldenFreddy);
+        // Sin AnimationComponent, nada mas recalcula los transforms globales/de hueso de Golden
+        // Freddy cada frame (a diferencia de los 4 animatronicos, cuyo AnimationController ya lo
+        // hace) -- hace falta llamarlo explicitamente para que el cambio de rotacion del nodo de
+        // cabeza se refleje realmente en el mesh skinneado.
+        Mappers.model.get(entidadGoldenFreddy).scene.modelInstance.calculateTransforms();
+    }
+
+    /** Interaccion (E) con Golden Freddy -- dispara su jumpscare especial de 1s. No hace nada si
+     * ya esta deshabilitado (murio una vez despues del primer jumpscare, ver
+     * limpiarGoldenFreddyPorMuerte()) o si ya hay otro estado especial en curso. */
+    private void interactuarConGoldenFreddy() {
+        if (goldenFreddyDeshabilitado || estado != EstadoPartida.JUGANDO) {
+            return;
+        }
+        iniciarGoldenFreddyJumpscare();
+    }
+
+    private void iniciarGoldenFreddyJumpscare() {
+        estado = EstadoPartida.GOLDEN_FREDDY_JUMPSCARE;
+        tiempoEnEstadoGoldenFreddy = 0f;
+        goldenFreddyJumpscareYaOcurrido = true;
+        if (idSonidoGlitchGraveActivo != -1) {
+            sonidoGlitchGrave.stop(idSonidoGlitchGraveActivo);
+            idSonidoGlitchGraveActivo = -1;
+        }
+        goldenFreddyDentroDeRango = false;
+        // Imagen y sonido arrancan juntos, en el mismo instante (pedido explicito del usuario) --
+        // el primer dibujarTexturaFullscreen ocurre en el primer frame de actualizarGoldenFreddyJumpscare,
+        // llamado inmediatamente despues de esto en el mismo frame de render().
+        idSonidoXscream2Activo = sonidoXscream2.play();
+    }
+
+    private void actualizarGoldenFreddyJumpscare(float dt) {
+        tiempoEnEstadoGoldenFreddy += dt;
+        dibujarTexturaFullscreen(texturaGoldenFreddyJumpscare);
+        if (tiempoEnEstadoGoldenFreddy >= DURACION_GOLDEN_FREDDY_JUMPSCARE) {
+            sonidoXscream2.stop(idSonidoXscream2Activo);
+            idSonidoXscream2Activo = -1;
+            iniciarGoldenFreddyFade();
+        }
+    }
+
+    private void iniciarGoldenFreddyFade() {
+        estado = EstadoPartida.GOLDEN_FREDDY_FADE;
+        tiempoEnEstadoGoldenFreddy = 0f;
+        sonidoRespiracionAgitada.play();
+    }
+
+    private void actualizarGoldenFreddyFade(float dt) {
+        tiempoEnEstadoGoldenFreddy += dt;
+
+        // Mismo patron ya usado por el menu de pausa/la cinematica: sceneManager.update(0f) (nunca
+        // engine.update()) mantiene la escena congelada -- ningun animatronico avanza durante toda
+        // la secuencia de Golden Freddy, pedido explicito del usuario.
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(0f);
+        sceneManager.render();
+
+        float alpha = 1f - MathUtils.clamp(tiempoEnEstadoGoldenFreddy / DURACION_GOLDEN_FREDDY_FADE, 0f, 1f);
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(0f, 0f, 0f, alpha);
+        uiShapes.rect(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        uiShapes.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+
+        if (tiempoEnEstadoGoldenFreddy >= DURACION_GOLDEN_FREDDY_FADE) {
+            iniciarGoldenFreddyItsMe();
+        }
+    }
+
+    /** Punto de entrada UNICO para la fase ITSME -- usado tanto la primera vez (llamado desde
+     * actualizarGoldenFreddyFade al terminar el fundido) como en cada repeticion posterior cada
+     * ~24s (llamado desde actualizarGoldenFreddy). Mismo cuerpo exacto en ambos casos: el pedido
+     * explicito del usuario es que la repeticion sea IDENTICA a la fase ITSME original, solo que
+     * sin el jumpscare/fundido delante.
+     *
+     * Pedido explicito del usuario 2026-08-11: el efecto visual ya NO es texto disperso generado
+     * por procedimiento -- es el GIF real ItsMe.gif (mismo patron ya usado por la estatica:
+     * recorrido en bucle con las duraciones reales de cada cuadro durante toda la ventana de
+     * DURACION_GOLDEN_FREDDY_ITSME). robotvoice.wav sigue reproduciendose durante los mismos 4
+     * segundos exactamente igual que antes -- eso no cambio. */
+    private void iniciarGoldenFreddyItsMe() {
+        estado = EstadoPartida.GOLDEN_FREDDY_ITSME;
+        tiempoEnEstadoGoldenFreddy = 0f;
+        indiceCuadroItsMe = 0;
+        tiempoEnCuadroItsMe = 0f;
+        idSonidoRobotvoiceActivo = sonidoRobotvoice.play();
+    }
+
+    private void actualizarGoldenFreddyItsMe(float dt) {
+        tiempoEnEstadoGoldenFreddy += dt;
+
+        tiempoEnCuadroItsMe += dt;
+        while (tiempoEnCuadroItsMe >= duracionesCuadroItsMe.get(indiceCuadroItsMe)) {
+            tiempoEnCuadroItsMe -= duracionesCuadroItsMe.get(indiceCuadroItsMe);
+            indiceCuadroItsMe = (indiceCuadroItsMe + 1) % cuadrosItsMe.size;
+        }
+        dibujarTexturaFullscreen(cuadrosItsMe.get(indiceCuadroItsMe));
+
+        if (tiempoEnEstadoGoldenFreddy >= DURACION_GOLDEN_FREDDY_ITSME) {
+            sonidoRobotvoice.stop(idSonidoRobotvoiceActivo);
+            idSonidoRobotvoiceActivo = -1;
+            estado = EstadoPartida.JUGANDO;
+            goldenFreddyTiempoHastaProximoEfecto = GOLDEN_FREDDY_INTERVALO_REPETICION;
+        }
+    }
+
+    /** MUY IMPORTANTE (pedido explicito del usuario 2026-08-10): llamado desde
+     * resolverFinDeAtrapada() en CADA perdida de vida. Si el jumpscare especial de Golden Freddy ya
+     * ocurrio alguna vez en esta partida, deshabilita a Golden Freddy por el resto de la partida y
+     * limpia cualquier estado colgante (GlitchGrave sonando, robotvoice sonando, textos IT'S ME
+     * pendientes, timer de repeticion) -- nunca debe quedar nada sonando/dibujandose despues de un
+     * respawn. No hace nada si el jumpscare nunca ocurrio (Golden Freddy sigue disponible con
+     * normalidad para el resto de la partida en ese caso). */
+    private void limpiarGoldenFreddyPorMuerte() {
+        if (!goldenFreddyJumpscareYaOcurrido || goldenFreddyDeshabilitado) {
+            return;
+        }
+        goldenFreddyDeshabilitado = true;
+        if (idSonidoGlitchGraveActivo != -1) {
+            sonidoGlitchGrave.stop(idSonidoGlitchGraveActivo);
+            idSonidoGlitchGraveActivo = -1;
+        }
+        if (idSonidoRobotvoiceActivo != -1) {
+            sonidoRobotvoice.stop(idSonidoRobotvoiceActivo);
+            idSonidoRobotvoiceActivo = -1;
+        }
+        goldenFreddyDentroDeRango = false;
+        goldenFreddyTiempoHastaProximoEfecto = -1f;
+        if (nodoCabezaGoldenFreddy != null && (goldenFreddyHeadYawActual != 0f || goldenFreddyHeadPitchActual != 0f
+                || goldenFreddyHeadRollActual != 0f)) {
+            goldenFreddyHeadYawActual = 0f;
+            goldenFreddyHeadPitchActual = 0f;
+            goldenFreddyHeadRollActual = 0f;
+            aplicarRotacionCabezaGoldenFreddy();
+        }
     }
 
     /** Crosshair pequeño y discreto (pedido explicito del usuario 2026-08-10) -- un punto en el
@@ -1138,6 +1503,15 @@ public class GameplayScreen implements Screen {
             case CORAZONES_RESPAWN:
                 actualizarCorazonesRespawn(dt);
                 return;
+            case GOLDEN_FREDDY_JUMPSCARE:
+                actualizarGoldenFreddyJumpscare(dt);
+                return;
+            case GOLDEN_FREDDY_FADE:
+                actualizarGoldenFreddyFade(dt);
+                return;
+            case GOLDEN_FREDDY_ITSME:
+                actualizarGoldenFreddyItsMe(dt);
+                return;
             default:
                 break;
         }
@@ -1210,9 +1584,11 @@ public class GameplayScreen implements Screen {
         actualizarLatidosYVineta(playerTransform.position);
         actualizarMusicaEspacialFreddy();
         actualizarRisaOcasionalFreddy(dt);
+        actualizarGoldenFreddy(dt, playerTransform.position);
         // Ya no hay disparo automatico por proximidad -- la puerta de salida ahora es un
         // ObjetoInteractivo mas (pedido explicito del usuario 2026-08-10), ver
-        // interactuarConPuertaSalida(). actualizarInteraccion() tambien maneja la llave.
+        // interactuarConPuertaSalida(). actualizarInteraccion() tambien maneja la llave y a
+        // Golden Freddy (interactuarConGoldenFreddy()).
         actualizarInteraccion();
         // BUG REAL encontrado y corregido en esta sesion ("comportamiento extraño despues de
         // ganar con la llave"): interactuarConPuertaSalida() (llamada dentro de
@@ -1225,7 +1601,12 @@ public class GameplayScreen implements Screen {
         // frame de EscapeVictoryScreen llegara a mostrarse. Reproducido y confirmado real
         // reproduciendo el flujo completo (recoger llave -> interactuar con la puerta con
         // llave), no solo inferido leyendo el codigo -- ver CLAUDE.md.
-        if (escapado) {
+        //
+        // Mismo motivo, mismo guard: interactuarConGoldenFreddy() (tambien dentro de
+        // actualizarInteraccion()) puede cambiar "estado" a GOLDEN_FREDDY_JUMPSCARE en este mismo
+        // frame -- sin este chequeo, dibujarCrosshair()/etc. seguirian dibujando la escena normal
+        // encima del primer frame del jumpscare especial.
+        if (escapado || estado != EstadoPartida.JUGANDO) {
             return;
         }
         dibujarCrosshair();
@@ -1562,6 +1943,11 @@ public class GameplayScreen implements Screen {
         // jugador le quedan vidas o no -- perderLlave() ya se guarda solo (no hace nada si nunca
         // tuvo la llave, el mensaje nunca aparece en ese caso).
         perderLlave();
+        // MUY IMPORTANTE (pedido explicito del usuario 2026-08-10): en CADA perdida de vida, no
+        // solo la primera -- si el jumpscare especial de Golden Freddy ya ocurrio antes en esta
+        // partida, se deshabilita permanentemente y se limpia cualquier estado colgante. Ver
+        // limpiarGoldenFreddyPorMuerte().
+        limpiarGoldenFreddyPorMuerte();
         vidasRestantes--;
         if (vidasRestantes > 0) {
             estado = EstadoPartida.CORAZONES_RESPAWN;
@@ -1656,11 +2042,21 @@ public class GameplayScreen implements Screen {
         uiFont.getData().setScale(escalaOriginal);
     }
 
+    /** Uno de los cuadros reales del GIF de estatica (Static.gif) tiene un borde blanco delgado
+     * en su borde inferior (defecto real del propio cuadro decodificado, no un artefacto de
+     * filtrado de textura -- confirmado visualmente). Pedido explicito del usuario 2026-08-10:
+     * taparlo extendiendo el AREA de dibujo unos pocos pixeles hacia abajo (el borde inferior de
+     * la textura queda fuera de pantalla, recortado) sin mover el GIF -- el borde SUPERIOR se
+     * mantiene exactamente en su lugar (y=alturaPantalla, sin cambio), solo el inferior baja de
+     * y=0 a y=-ESTATICA_EXTENSION_INFERIOR_PX. */
+    private static final float ESTATICA_EXTENSION_INFERIOR_PX = 6f;
+
     private void dibujarTexturaFullscreen(Texture textura) {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         uiBatch.begin();
-        uiBatch.draw(textura, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        uiBatch.draw(textura, 0, -ESTATICA_EXTENSION_INFERIOR_PX,
+                Gdx.graphics.getWidth(), Gdx.graphics.getHeight() + ESTATICA_EXTENSION_INFERIOR_PX);
         uiBatch.end();
     }
 
@@ -1822,6 +2218,9 @@ public class GameplayScreen implements Screen {
         uiFont.dispose();
         uiShapes.dispose();
         for (Texture cuadro : cuadrosEstatica) {
+            cuadro.dispose();
+        }
+        for (Texture cuadro : cuadrosItsMe) {
             cuadro.dispose();
         }
         texturaCorazonLleno.dispose();
