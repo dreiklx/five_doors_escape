@@ -93,11 +93,16 @@ public class GameplayScreen implements Screen {
     // durante la partida no puede interactuarse con el" sin soltar antes el mouse-look). Se
     // muestra solo, no invasivo, durante los primeros segundos de JUGANDO y se desvanece solo --
     // no bloquea el juego ni requiere ninguna accion del jugador. Ver dibujarAyudaInicial().
+    // Tambien reaparece tras cada respawn (pedido explicito del usuario 2026-08-10, ver
+    // respawnJugador()) -- mismo timer, solo se reinicia a 0.
     private static final float AYUDA_ANCHO = 320f;
     // 118 -> 144: una linea mas para "E: Interactuar" (pedido explicito del usuario 2026-08-10).
     private static final float AYUDA_ALTO = 144f;
     private static final float AYUDA_MARGEN = 16f;
-    private static final float AYUDA_DURACION_VISIBLE = 9f;
+    // 9 -> 10: pedido explicito del usuario 2026-08-10 ("permanece visible aproximadamente 10
+    // segundos"), incluye el propio desvanecimiento (AYUDA_DURACION_FUNDIDO) en ese total, igual
+    // que ya funcionaba antes -- no una duracion adicional aparte.
+    private static final float AYUDA_DURACION_VISIBLE = 10f;
     private static final float AYUDA_DURACION_FUNDIDO = 1.5f;
 
     // Menu de pausa (pedido explicito del usuario 2026-08-05): ESC ya no solo libera/recaptura
@@ -272,6 +277,20 @@ public class GameplayScreen implements Screen {
     private Sound sonidoEstatica;
     private Sound sonidoRisaFreddy;
     private boolean risaFreddyReproducida = false;
+    /** Risa OCASIONAL de Freddy durante el gameplay normal (pedido explicito del usuario
+     * 2026-08-10): reutiliza el mismo Sound que ya suena una vez al mostrar RUN -- Sound.play()
+     * crea una instancia de reproduccion independiente cada vez (a diferencia de los Clip de
+     * javax.sound del lado Swing), asi que no hay ningun riesgo de "cerrarse" ni de interferir
+     * con la musica espacial de Freddy o los latidos (Sound distintos, mezclados de forma nativa
+     * por OpenAL, nunca se detienen entre si). Espera aleatoria entre RISA_OCASIONAL_ESPERA_MIN_S
+     * y _MAX_S (45-100s reales) -- "poco frecuente, impredecible" sin depender de la posicion de
+     * Freddy ni de ningun otro estado, solo del tiempo real transcurrido en JUGANDO (el unico
+     * estado donde se actualiza este timer -- nunca durante cinematica/intro/jumpscare/estatica/
+     * pausa/Game Over, todos esos casos ya retornan antes de llegar a actualizarRisaOcasionalFreddy()). */
+    private static final float RISA_OCASIONAL_ESPERA_MIN_S = 45f;
+    private static final float RISA_OCASIONAL_ESPERA_MAX_S = 100f;
+    private float tiempoHastaRisaOcasionalFreddy =
+            MathUtils.random(RISA_OCASIONAL_ESPERA_MIN_S, RISA_OCASIONAL_ESPERA_MAX_S);
     private Sound sonidoLinternaClick;
     /** Estado real de la linterna (pedido explicito del usuario 2026-08-05: poder apagarla con
      * CTRL). Empieza encendida -- comportamiento previo, ninguna regresion para quien no toque
@@ -374,6 +393,11 @@ public class GameplayScreen implements Screen {
     private Sound sonidoForzandoPuerta;
     private Sound sonidoAgarrandoObjeto;
     private float mensajeLlaveTiempoRestante = 0f;
+    /** Clave real de Lang.get(...) para el mensaje temporal actualmente pendiente -- "key.need"
+     * (interactuar con la puerta sin llave) o "key.lost" (perder la llave al morir, pedido
+     * explicito del usuario 2026-08-10). Un solo timer/mecanismo de dibujo (dibujarMensajeLlave)
+     * cubre ambos casos, ya que nunca pueden estar activos a la vez en la practica. */
+    private String mensajeLlaveTextoClave = "key.need";
 
     private Texture texturaSangre;
     private final Array<Model> modelosDecalSangre = new Array<>();
@@ -890,6 +914,17 @@ public class GameplayScreen implements Screen {
         sonidoMusicaFreddy.setPan(idSonidoMusicaFreddy, pan, volumen);
     }
 
+    /** Cuenta regresiva real hacia la proxima risa ocasional de Freddy -- ver comentario del
+     * campo tiempoHastaRisaOcasionalFreddy para el diseno completo. Un simple play() de un Sound
+     * ya cargado, nunca toca sonidoMusicaFreddy/latidos/jumpscare/estatica. */
+    private void actualizarRisaOcasionalFreddy(float dt) {
+        tiempoHastaRisaOcasionalFreddy -= dt;
+        if (tiempoHastaRisaOcasionalFreddy <= 0f) {
+            sonidoRisaFreddy.play();
+            tiempoHastaRisaOcasionalFreddy = MathUtils.random(RISA_OCASIONAL_ESPERA_MIN_S, RISA_OCASIONAL_ESPERA_MAX_S);
+        }
+    }
+
     /**
      * Detiene el latido activo (si hay alguno). Necesario al entrar a JUMPSCARE/ESTATICA/
      * CORAZONES_RESPAWN: esos estados retornan temprano en render() y nunca vuelven a llamar
@@ -977,36 +1012,97 @@ public class GameplayScreen implements Screen {
             dispose();
         } else {
             sonidoForzandoPuerta.play();
+            mensajeLlaveTextoClave = "key.need";
             mensajeLlaveTiempoRestante = MENSAJE_LLAVE_DURACION;
         }
     }
 
+    /** Pierde la llave si el jugador la tenia al ser atrapado (pedido explicito del usuario
+     * 2026-08-10): revierte EXACTAMENTE lo que hizo recogerLlave() -- la llave 3D vuelve a
+     * aparecer en su posicion original y su interactivo se reactiva, para que el jugador tenga
+     * que recogerla de nuevo si quiere volver a intentar la puerta. Se llama desde
+     * resolverFinDeAtrapada(), antes de la secuencia de corazones/respawn (o del Game Over final),
+     * asi que el mensaje "Perdiste la llave" ya esta listo para mostrarse en cuanto el jugador
+     * recupere el control. No hace nada si no tenia la llave -- el mensaje nunca debe aparecer si
+     * murio sin haberla recogido. */
+    private void perderLlave() {
+        if (!tieneLlave) {
+            return;
+        }
+        tieneLlave = false;
+        for (ObjetoInteractivo objeto : objetosInteractivos) {
+            if (objeto.posicion.epsilonEquals(mapDef.keyX, mapDef.keyY, mapDef.keyZ, 0.001f)) {
+                objeto.activo = true;
+            }
+        }
+        if (entidadLlave != null) {
+            ModelComponent modelo = Mappers.model.get(entidadLlave);
+            if (modelo != null) {
+                sceneManager.addScene(modelo.scene);
+            }
+        }
+        mensajeLlaveTextoClave = "key.lost";
+        mensajeLlaveTiempoRestante = MENSAJE_LLAVE_DURACION;
+    }
+
     /** Crosshair pequeño y discreto (pedido explicito del usuario 2026-08-10) -- un punto en el
      * centro de la pantalla, ligeramente mas grande/opaco cuando hay un objetivo interactuable
-     * real delante (ver actualizarInteraccion), nunca un HUD invasivo. */
+     * real delante (ver actualizarInteraccion), nunca un HUD invasivo.
+     *
+     * INVESTIGACION REAL de esta sesion ("el crosshair a veces desaparece"): se probo la
+     * hipotesis de oclusion por el depth buffer real que deja sceneManager.render() (el
+     * ShapeRenderer no toca GL_DEPTH_TEST) con una comparacion real A/B (mismo frame, con y sin
+     * este metodo) en 7 puntos de vista distintos y diversos (pared cercana, area abierta, la
+     * llave y la puerta en su estado "activo" real via actualizarInteraccion(), una mesa del
+     * comedor de cerca, Pirate Cove, cerca de Freddy) -- en los 7 casos el pixel central SI
+     * cambia de forma consistente con la formula real de blending (alpha 0.55/0.95 sobre el color
+     * de fondo real), confirmando que dibujarCrosshair() se ejecuta y dibuja correctamente
+     * SIEMPRE que se le llama (nunca ocluido, nunca una llamada perdida -- ya se llama de forma
+     * incondicional en cada frame de JUGANDO). No existia ningun booleano/estado de "visible" que
+     * arreglar -- la causa real es de CONTRASTE: un punto blanco de 3.2px al 55% de opacidad
+     * puede genuinamente perderse contra fondos claros reales (paredes iluminadas por la linterna,
+     * el piso, superficies del mapa con colores pastel) incluso estando dibujado correctamente,
+     * sin ser un bug de logica. Corregido con un contorno oscuro real (mismo patron que cualquier
+     * crosshair de FPS -- un circulo mas grande y oscuro detras, el circulo blanco encima) que
+     * garantiza contraste sin importar el color de fondo, en vez de un setVilble(true) ciego que
+     * no habria arreglado nada (nunca hubo un booleano de visibilidad apagandose).
+     */
+    private static final float CROSSHAIR_CONTORNO_EXTRA = 2.0f;
+
     private void dibujarCrosshair() {
         float cx = Gdx.graphics.getWidth() / 2f;
         float cy = Gdx.graphics.getHeight() / 2f;
         boolean activo = objetivoInteractivoActual != null;
+        float radio = activo ? CROSSHAIR_RADIO_ACTIVO : CROSSHAIR_RADIO_NORMAL;
 
         uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         Gdx.gl.glEnable(GL20.GL_BLEND);
         uiShapes.begin(ShapeRenderer.ShapeType.Filled);
-        uiShapes.setColor(1f, 1f, 1f, activo ? 0.95f : 0.55f);
-        uiShapes.circle(cx, cy, activo ? CROSSHAIR_RADIO_ACTIVO : CROSSHAIR_RADIO_NORMAL);
+        // Contorno oscuro primero (mas grande) -- da contraste real contra fondos claros sin
+        // dejar de ser discreto: mismo radio extra sin importar el estado activo/normal. Alpha
+        // subida de 0.35/0.55 a 0.75/0.9 tras confirmar con una captura real que el contraste
+        // inicial seguia siendo insuficiente contra un fondo claro real (pared bien iluminada).
+        uiShapes.setColor(0f, 0f, 0f, activo ? 0.9f : 0.75f);
+        uiShapes.circle(cx, cy, radio + CROSSHAIR_CONTORNO_EXTRA);
+        // Punto blanco real encima. Alpha subida de 0.55/0.95 a 0.85/0.98 por el mismo motivo.
+        uiShapes.setColor(1f, 1f, 1f, activo ? 0.98f : 0.85f);
+        uiShapes.circle(cx, cy, radio);
         uiShapes.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
-    /** Mensaje temporal "Necesitas una llave"/"You need a key" -- se desvanece solo tras
-     * MENSAJE_LLAVE_DURACION segundos, el jugador nunca queda bloqueado ni pierde control. */
+    /** Mensaje temporal (dos variantes posibles, ver mensajeLlaveTextoClave): "Necesitas una
+     * llave"/"You need a key" (interactuar con la puerta sin llave) o "Perdiste la llave"/"You
+     * lost the key" (morir con la llave, pedido explicito del usuario 2026-08-10) -- se desvanece
+     * solo tras MENSAJE_LLAVE_DURACION segundos, el jugador nunca queda bloqueado ni pierde
+     * control. */
     private void dibujarMensajeLlave(float dt) {
         if (mensajeLlaveTiempoRestante <= 0f) {
             return;
         }
         mensajeLlaveTiempoRestante = Math.max(0f, mensajeLlaveTiempoRestante - dt);
 
-        String texto = Lang.get(handoff.idioma, "key.need");
+        String texto = Lang.get(handoff.idioma, mensajeLlaveTextoClave);
         GlyphLayout layout = new GlyphLayout(uiFont, texto);
         float x = Gdx.graphics.getWidth() / 2f - layout.width / 2f;
         float y = Gdx.graphics.getHeight() * 0.28f;
@@ -1113,6 +1209,7 @@ public class GameplayScreen implements Screen {
 
         actualizarLatidosYVineta(playerTransform.position);
         actualizarMusicaEspacialFreddy();
+        actualizarRisaOcasionalFreddy(dt);
         // Ya no hay disparo automatico por proximidad -- la puerta de salida ahora es un
         // ObjetoInteractivo mas (pedido explicito del usuario 2026-08-10), ver
         // interactuarConPuertaSalida(). actualizarInteraccion() tambien maneja la llave.
@@ -1460,6 +1557,11 @@ public class GameplayScreen implements Screen {
     }
 
     private void resolverFinDeAtrapada() {
+        // Perder la llave al ser atrapado (pedido explicito del usuario 2026-08-10): antes de
+        // cualquier otra cosa, para que este siempre en el mismo punto sin importar si al
+        // jugador le quedan vidas o no -- perderLlave() ya se guarda solo (no hace nada si nunca
+        // tuvo la llave, el mensaje nunca aparece en ese caso).
+        perderLlave();
         vidasRestantes--;
         if (vidasRestantes > 0) {
             estado = EstadoPartida.CORAZONES_RESPAWN;
@@ -1488,6 +1590,11 @@ public class GameplayScreen implements Screen {
         playerTransform.yawDegrees = mapDef.playerStartYawDegrees;
         cameraController.resetOrientation(mapDef.playerStartYawDegrees);
         cameraController.applyToCamera(playerTransform.position);
+
+        // Panel de controles otra vez, ~AYUDA_DURACION_VISIBLE segundos (pedido explicito del
+        // usuario 2026-08-10) -- el jugador acaba de morir/reaparecer, un buen momento para
+        // recordarle los controles reales.
+        tiempoJugandoTranscurrido = 0f;
 
         for (int i = 0; i < guardias.size; i++) {
             AIComponent ai = guardias.get(i);
