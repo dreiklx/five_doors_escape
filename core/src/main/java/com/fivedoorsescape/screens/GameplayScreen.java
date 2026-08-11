@@ -135,6 +135,10 @@ public class GameplayScreen implements Screen {
      * el jugador interactua con la puerta de salida SIN tener la llave -- ver
      * actualizarInteraccion()/objetosInteractivos. */
     public static final String SONIDO_FORZANDO_PUERTA = "sounds/forzando_puerta.wav";
+    /** Reutilizado de FDAF assets (pedido explicito del usuario, misma sesion 2026-08-10): se
+     * reproduce EXACTAMENTE al recoger la llave de verdad (dentro de recogerLlave(), no al solo
+     * mirarla) -- mismo patron ya establecido para el resto de sonidos de esta pantalla. */
+    public static final String SONIDO_AGARRANDO_OBJETO = "sounds/agarrando_objeto.wav";
 
     /** Narracion de la cinematica inicial del modo Escape, en los 2 idiomas soportados (pedido
      * explicito del usuario 2026-08-05, mismos audios "Escape ES/EN" que el proyecto Swing usa
@@ -368,6 +372,7 @@ public class GameplayScreen implements Screen {
     private Entity entidadLlave;
     private boolean tieneLlave = false;
     private Sound sonidoForzandoPuerta;
+    private Sound sonidoAgarrandoObjeto;
     private float mensajeLlaveTiempoRestante = 0f;
 
     private Texture texturaSangre;
@@ -569,6 +574,7 @@ public class GameplayScreen implements Screen {
         sonidoLinternaClick = assets.getSound(SONIDO_LINTERNA_CLICK);
         sonidoMusicaFreddy = assets.getSound(SONIDO_MUSICA_FREDDY);
         sonidoForzandoPuerta = assets.getSound(SONIDO_FORZANDO_PUERTA);
+        sonidoAgarrandoObjeto = assets.getSound(SONIDO_AGARRANDO_OBJETO);
         // Arranca en loop UNA sola vez, en silencio -- el volumen/pan real se actualiza cada
         // frame en actualizarMusicaEspacialFreddy() segun la distancia/direccion real a Freddy.
         // Nunca se reinicia/vuelve a lanzar -- un unico Sound.loop() para toda la partida, como
@@ -665,18 +671,31 @@ public class GameplayScreen implements Screen {
      * Mancha de sangre ambiental frente a la puerta de salida (pedido explicito del usuario
      * 2026-08-10): terror sutil, nunca una flecha literal -- una mancha principal irregular mas
      * dos gotas mas pequeñas escalonadas, cada vez mas cerca de la puerta, generadas con la misma
-     * tecnica ya usada por crearTexturaVineta (Pixmap procedural, sin asset externo nuevo). Y del
-     * lado de la puerta por donde realmente se puede caminar (offset positivo en Z, confirmado por
-     * la topologia real del mapa -- ver CLAUDE.md, el area abierta real queda al norte del punto
-     * exitZ). Quads pintados a nivel de piso (Y=0.015, evita z-fighting con el piso real) con
-     * blending real y sin backface culling (mismo patron que el mapa).
+     * tecnica ya usada por crearTexturaVineta (Pixmap procedural, sin asset externo nuevo). Quads
+     * pintados a nivel de piso (Y=0.015, evita z-fighting con el piso real) con blending real y
+     * sin backface culling (mismo patron que el mapa).
+     *
+     * BUG REAL corregido en esta sesion ("la sangre no aparece"): las 3 posiciones originales
+     * (offset puramente en +Z respecto a exitZ: +1.4/+0.85/+0.45, todas con X~exitX) estaban las
+     * TRES embebidas dentro de un collider solido real -- confirmado con un barrido de colision en
+     * vivo (CollisionWorld.overlapsStatic) que mostro una franja solida angosta (un pilar/elemento
+     * de la puerta, no solo la hoja en si) que se extiende mucho mas alla del hueco de la puerta a
+     * lo largo del eje +Z, justo sobre la columna X=exitX -- exactamente donde estaban las 3
+     * manchas. La suposicion original ("el area abierta real queda al norte de exitZ", basada en
+     * la topologia general del edificio documentada en sesiones anteriores) era cierta para el
+     * edificio en general pero no se habia verificado especificamente sobre la columna X=exitX,
+     * que resulto estar bloqueada. El area realmente libre y mas cercana a la puerta esta
+     * desplazada tambien en +X (confirmado con el mismo barrido: a partir de X=exitX+0.3 aprox.,
+     * la columna completa queda libre desde muy cerca de la puerta) -- el rastro ahora sigue esa
+     * diagonal real en vez de una linea recta en Z. Verificado visualmente con capturas reales
+     * (ver CLAUDE.md) tras la correccion.
      */
     private void crearDecalesSangre() {
         texturaSangre = crearTexturaSangre();
         ModelBuilder modelBuilder = new ModelBuilder();
-        agregarDecalSangre(modelBuilder, exitX, exitZ + 1.4f, 1.3f);
-        agregarDecalSangre(modelBuilder, exitX + 0.25f, exitZ + 0.85f, 0.55f);
-        agregarDecalSangre(modelBuilder, exitX - 0.2f, exitZ + 0.45f, 0.4f);
+        agregarDecalSangre(modelBuilder, exitX + 1.0f, exitZ + 0.6f, 1.3f);
+        agregarDecalSangre(modelBuilder, exitX + 0.6f, exitZ + 0.3f, 0.55f);
+        agregarDecalSangre(modelBuilder, exitX + 0.3f, exitZ + 0.1f, 0.4f);
     }
 
     private void agregarDecalSangre(ModelBuilder modelBuilder, float x, float z, float tamano) {
@@ -929,6 +948,7 @@ public class GameplayScreen implements Screen {
             return;
         }
         tieneLlave = true;
+        sonidoAgarrandoObjeto.play();
         for (ObjetoInteractivo objeto : objetosInteractivos) {
             if (objeto.posicion.epsilonEquals(mapDef.keyX, mapDef.keyY, mapDef.keyZ, 0.001f)) {
                 objeto.activo = false;
@@ -1097,6 +1117,20 @@ public class GameplayScreen implements Screen {
         // ObjetoInteractivo mas (pedido explicito del usuario 2026-08-10), ver
         // interactuarConPuertaSalida(). actualizarInteraccion() tambien maneja la llave.
         actualizarInteraccion();
+        // BUG REAL encontrado y corregido en esta sesion ("comportamiento extraño despues de
+        // ganar con la llave"): interactuarConPuertaSalida() (llamada dentro de
+        // actualizarInteraccion(), arriba) hace game.setScreen(victoria) + dispose() en el MISMO
+        // frame en el que se presiono E sobre la puerta -- dispose() libera uiBatch/uiFont/
+        // uiShapes entre otros recursos GL. Sin este guard, el resto de este mismo render()
+        // seguia ejecutandose (dibujarCrosshair/dibujarMensajeLlave/dibujarAyudaInicial, todos
+        // usan esos mismos objetos ya liberados) DESPUES de haberlos liberado -- dibujando sobre
+        // recursos GL invalidos en el instante exacto de la victoria, antes de que el primer
+        // frame de EscapeVictoryScreen llegara a mostrarse. Reproducido y confirmado real
+        // reproduciendo el flujo completo (recoger llave -> interactuar con la puerta con
+        // llave), no solo inferido leyendo el codigo -- ver CLAUDE.md.
+        if (escapado) {
+            return;
+        }
         dibujarCrosshair();
         dibujarMensajeLlave(dt);
 

@@ -59,6 +59,7 @@ public class BootScreen implements Screen {
         assets.queueSound(GameplayScreen.SONIDO_LINTERNA_CLICK);
         assets.queueSound(GameplayScreen.SONIDO_MUSICA_FREDDY);
         assets.queueSound(GameplayScreen.SONIDO_FORZANDO_PUERTA);
+        assets.queueSound(GameplayScreen.SONIDO_AGARRANDO_OBJETO);
         assets.queueSound(GameplayScreen.rutaAudioEscape(handoff.idioma));
     }
 

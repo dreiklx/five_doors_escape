@@ -108,24 +108,43 @@ public class LevelLoader {
     private static final float FURNITURE_GROUP_MAX_FOOTPRINT_AREA = 5.0f;
 
     /**
-     * Erosion horizontal (X/Z) aplicada a cada collider generado por la subdivision de mobiliario
-     * fusionado (nunca a la subdivision de paredes, que recibe margenErosion=0). Hallazgo real
-     * jugando esta misma sesion tras el fix de arriba: los huecos reales entre mesas/sillas SI
-     * quedaron transitables (confirmado con una grilla real, 140 celdas libres), pero medir el
-     * ancho real de esos pasillos (barrido fino en X a varias alturas de Z) dio un resultado
-     * incomodo -- la mayoria de los cortes muestran corredores de EXACTAMENTE 0.60 unidades, el
-     * mismo ancho total de la caja de colision del jugador (halfExtents.x=0.3, 0.6 de ancho) -- es
-     * decir, technically transitable pero sin ningun margen real, obligando a centrarse con
-     * precision de pixel para no quedar "atascado" contra una silla. Un jugador real (o un
-     * animatronico persiguiendolo) rara vez camina perfectamente centrado. Esta erosion reduce
-     * cada collider de mobiliario 0.1 unidades por lado (0.2 unidades de ancho total ganado por
-     * pasillo), llevando esos corredores de ~0.60 a ~0.80 unidades -- suficiente margen real sin
-     * dejar de bloquear el mueble en si (las mesas/sillas siguen siendo solidas, solo con una caja
-     * de colision ligeramente mas generosa que su malla visual exacta, practica estandar en
-     * videojuegos). No se aplica a paredes (necesitan precision real para no filtrar huecos donde
-     * no los hay) ni cambia la altura (Y) de ningun collider.
+     * Tamano de celda especifico para la subdivision de mobiliario fusionado (mesas/sillas), mas
+     * fino que WALL_GRID_CELL_SIZE (paredes). Necesario para que FURNITURE_COLLIDER_EROSION (abajo)
+     * pueda erosionar sin destruir la colision -- ver el comentario de esa constante para el bug
+     * real que motivo separar esto de la grilla de paredes.
      */
-    private static final float FURNITURE_COLLIDER_EROSION = 0.1f;
+    private static final float FURNITURE_GRID_CELL_SIZE = 0.1f;
+
+    /**
+     * Erosion horizontal (X/Z) aplicada a cada collider generado por la subdivision de mobiliario
+     * fusionado (nunca a la subdivision de paredes, que recibe margenErosion=0 y usa
+     * WALL_GRID_CELL_SIZE). No cambia la altura (Y) de ningun collider.
+     *
+     * BUG REAL encontrado y corregido en esta sesion (jugando: "las mesas se pueden atravesar"):
+     * la version anterior de esta erosion (0.1 por lado, es decir 0.2 de ancho total) se aplicaba
+     * sobre celdas generadas con el mismo WALL_GRID_CELL_SIZE=0.2 que las paredes. Como
+     * rasterizarTriangulo SIEMPRE recorta (clip) la contribucion de cada triangulo a los limites
+     * de su propia celda, el ancho maximo posible de CUALQUIER celda esta matematicamente acotado
+     * por el tamano de celda (0.2) -- nunca puede ser mayor. Con una erosion total (0.2) igual al
+     * ancho maximo posible de una celda (0.2), la condicion "maxX <= minX" de mas abajo se cumplia
+     * SIEMPRE, sin excepcion real: efectivamente NINGUN collider de mobiliario sobrevivia (medido
+     * en vivo: de ~3300 celdas candidatas en el comedor, solo 106 "sobrevivian" el chequeo, y esos
+     * pocos casos son sliver de ancho practicamente cero por redondeo de punto flotante en los
+     * bordes exactos de celda -- no colliders funcionales). Es decir, la "mejora de pasillos" de
+     * la sesion anterior en realidad habia BORRADO la colision de mesas/sillas por completo, y la
+     * medicion de esa sesion ("87% de la grilla libre") -- que en su momento se interpreto como
+     * "excelente, pasillos comodos" -- era en realidad el sintoma exacto de este bug, no una
+     * mejora real. Nunca se investigo mas a fondo ese resultado sospechosamente alto en su momento.
+     *
+     * Correccion real: usar una grilla mas fina solo para mobiliario (FURNITURE_GRID_CELL_SIZE=0.1)
+     * y una erosion (0.03 por lado, 0.06 total) estrictamente menor a la mitad de esa celda (0.05)
+     * -- asi ninguna celda con cobertura completa puede erosionarse hasta cero. El efecto practico
+     * es identico al buscado originalmente (el jugador, con 0.6 de ancho de colision, nunca puede
+     * "colarse" por las costuras internas de ~0.06 que quedan entre celdas vecinas erosionadas
+     * dentro de una superficie continua como una mesa -- siempre solapa alguna celda vecina solida),
+     * pero sin el riesgo matematico de la version anterior. Verificado en vivo (ver CLAUDE.md).
+     */
+    private static final float FURNITURE_COLLIDER_EROSION = 0.03f;
 
     private final ContentRegistry registry;
     private final AssetService assets;
@@ -375,7 +394,7 @@ public class LevelLoader {
      * recupera colision solida donde realmente hay pared.
      */
     private void subdivideNode(Node node, Matrix4 instanceTransform, CollisionWorld collisionWorld,
-            Array<BoundingBox> puertaZonas, float margenErosion) {
+            Array<BoundingBox> puertaZonas, float margenErosion, float tamCelda) {
         Matrix4 nodeWorldTransform = new Matrix4(instanceTransform).mul(node.globalTransform);
         LongMap<CeldaAcumulador> celdas = new LongMap<>();
 
@@ -413,7 +432,7 @@ public class LevelLoader {
                 leerVertice(vertices, indices[i] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v0).mul(nodeWorldTransform);
                 leerVertice(vertices, indices[i + 1] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v1).mul(nodeWorldTransform);
                 leerVertice(vertices, indices[i + 2] & 0xFFFF, vertexSizeFloats, posOffsetFloats, v2).mul(nodeWorldTransform);
-                rasterizarTriangulo(v0, v1, v2, celdas);
+                rasterizarTriangulo(v0, v1, v2, celdas, tamCelda);
             }
         }
 
@@ -459,7 +478,8 @@ public class LevelLoader {
      * celda, solo su huella rectangular -- preferible errar hacia "un poco mas solido" que hacia
      * "un hueco donde no deberia haberlo").
      */
-    private void rasterizarTriangulo(Vector3 v0, Vector3 v1, Vector3 v2, LongMap<CeldaAcumulador> celdas) {
+    private void rasterizarTriangulo(Vector3 v0, Vector3 v1, Vector3 v2, LongMap<CeldaAcumulador> celdas,
+            float tamCelda) {
         float minX = Math.min(v0.x, Math.min(v1.x, v2.x));
         float maxX = Math.max(v0.x, Math.max(v1.x, v2.x));
         float minZ = Math.min(v0.z, Math.min(v1.z, v2.z));
@@ -467,19 +487,19 @@ public class LevelLoader {
         float minY = Math.min(v0.y, Math.min(v1.y, v2.y));
         float maxY = Math.max(v0.y, Math.max(v1.y, v2.y));
 
-        int ixMin = (int) Math.floor(minX / WALL_GRID_CELL_SIZE);
-        int ixMax = (int) Math.floor(maxX / WALL_GRID_CELL_SIZE);
-        int izMin = (int) Math.floor(minZ / WALL_GRID_CELL_SIZE);
-        int izMax = (int) Math.floor(maxZ / WALL_GRID_CELL_SIZE);
+        int ixMin = (int) Math.floor(minX / tamCelda);
+        int ixMax = (int) Math.floor(maxX / tamCelda);
+        int izMin = (int) Math.floor(minZ / tamCelda);
+        int izMax = (int) Math.floor(maxZ / tamCelda);
 
         for (int ix = ixMin; ix <= ixMax; ix++) {
-            float celdaMinX = ix * WALL_GRID_CELL_SIZE;
-            float celdaMaxX = celdaMinX + WALL_GRID_CELL_SIZE;
+            float celdaMinX = ix * tamCelda;
+            float celdaMaxX = celdaMinX + tamCelda;
             float xRecortadoMin = Math.max(minX, celdaMinX);
             float xRecortadoMax = Math.min(maxX, celdaMaxX);
             for (int iz = izMin; iz <= izMax; iz++) {
-                float celdaMinZ = iz * WALL_GRID_CELL_SIZE;
-                float celdaMaxZ = celdaMinZ + WALL_GRID_CELL_SIZE;
+                float celdaMinZ = iz * tamCelda;
+                float celdaMaxZ = celdaMinZ + tamCelda;
                 float zRecortadoMin = Math.max(minZ, celdaMinZ);
                 float zRecortadoMax = Math.min(maxZ, celdaMaxZ);
 
@@ -588,7 +608,7 @@ public class LevelLoader {
                     // pared subdividida -- ver comentario de esPisoDecorativoPirateCove. Seguro
                     // aqui porque las paredes (altura completa) nunca comparten huella real con la
                     // tarima de Pirate Cove (altura de piso, ~0.42) en la practica.
-                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, 0f);
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, 0f, WALL_GRID_CELL_SIZE);
                 } else if (grupoMobiliarioFusionado && !enZonaPuerta) {
                     // A diferencia del caso de arriba, aqui SI hace falta el chequeo de
                     // enZonaPuerta (incluye pisosDecorativosSinColision) -- bug real encontrado en
@@ -599,7 +619,8 @@ public class LevelLoader {
                     // spawn de Foxy, a Y=0 dentro de esa zona, quedaba incrustado). subdivideNode
                     // solo filtra por puertaZonas internamente (nunca pisosDecorativosSinColision),
                     // asi que la exclusion debe aplicarse aqui, antes de llamarlo.
-                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, FURNITURE_COLLIDER_EROSION);
+                    subdivideNode(node, instanceTransform, collisionWorld, puertaZonas, FURNITURE_COLLIDER_EROSION,
+                            FURNITURE_GRID_CELL_SIZE);
                 }
             }
         }
