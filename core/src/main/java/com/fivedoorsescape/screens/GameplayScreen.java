@@ -30,6 +30,7 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 
@@ -243,13 +244,20 @@ public class GameplayScreen implements Screen {
      * que los 4 animatronicos quedan realmente congelados durante toda la secuencia (mismo patron
      * ya usado por JUMPSCARE/ESTATICA/CINEMATICA_INICIAL). */
     private static final float DURACION_GOLDEN_FREDDY_JUMPSCARE = 1f;
-    private static final float DURACION_GOLDEN_FREDDY_FADE = 1f;
+    private static final float DURACION_GOLDEN_FREDDY_FADE = 2f;
     private static final float DURACION_GOLDEN_FREDDY_ITSME = 4f;
     private static final float GOLDEN_FREDDY_INTERVALO_REPETICION = 24f;
     private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 1f;
-    private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.5f, 0.95f, 0.5f);
+    private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.65f, 0.9f, 0.65f);
     private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
     private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
+    /** Pedido explicito del usuario 2026-08-11: "GlitchGrave/robotvoice casi no se escuchan".
+     * Ambos ya se reproducian con volumen 1.0 (el maximo NOMINAL de Sound.play()/loop()) -- para
+     * subirlos de verdad hace falta pasar un valor MAYOR a 1.0 (OpenAL/libGDX lo permite,
+     * amplificando la ganancia real). Elegidos con margen deliberado por debajo de un valor que
+     * distorsione (no absurdo, pedido explicito) -- 1.8/1.9, no 3.0+. */
+    private static final float GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE = 1.8f;
+    private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.9f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
         CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, GOLDEN_FREDDY_FADE, GOLDEN_FREDDY_ITSME }
@@ -484,6 +492,16 @@ public class GameplayScreen implements Screen {
     private boolean goldenFreddyDeshabilitado = false;
     private float goldenFreddyTiempoHastaProximoEfecto = -1f;
     private final Quaternion tmpQuaternionGoldenFreddy = new Quaternion();
+    /** Referencias guardadas al crear a Golden Freddy (ver show()), necesarias para retirarlo
+     * POR COMPLETO de la partida en cuanto dispara su jumpscare (pedido explicito del usuario
+     * 2026-08-11: "debe desaparecer completamente" -- ya no visible, ya no collider, ya no
+     * detectable por crosshair/E, ya no GlitchGrave). Distinto de goldenFreddyDeshabilitado (que
+     * ademas cancela la repeticion de ITSME y solo se activa al morir) -- aqui el cuerpo
+     * desaparece pero la repeticion periodica de la fase ITSME (solo el efecto, sin el cuerpo)
+     * sigue funcionando exactamente igual que antes, ver actualizarGoldenFreddy(). */
+    private BoundingBox goldenFreddyColliderBox;
+    private ObjetoInteractivo interactivoGoldenFreddy;
+    private boolean goldenFreddyCuerpoVisible = true;
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
         this.game = game;
@@ -508,6 +526,7 @@ public class GameplayScreen implements Screen {
         Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
         collisionWorld.configurarEscalon(mapDef.stageMinX, mapDef.stageMaxX, mapDef.stageMinZ, mapDef.stageMaxZ,
                 mapDef.stageHeight);
+
 
         camera = new PerspectiveCamera(67f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.near = 0.05f;
@@ -581,11 +600,12 @@ public class GameplayScreen implements Screen {
         entidadGoldenFreddy = factory.createEntity("golden_freddy", goldenFreddyPos, mapDef.goldenFreddyYawDegrees);
         numBones = Math.max(numBones, assets.getModel(registry.getEntityDefinition("golden_freddy").modelPath).maxBones);
         warnIfEmbedded("GoldenFreddy", goldenFreddyPos, GOLDEN_FREDDY_HALF_EXTENTS);
-        collisionWorld.addStaticCollider(new com.badlogic.gdx.math.collision.BoundingBox(
+        goldenFreddyColliderBox = new BoundingBox(
                 new Vector3(goldenFreddyPos.x - GOLDEN_FREDDY_HALF_EXTENTS.x, 0f, goldenFreddyPos.z - GOLDEN_FREDDY_HALF_EXTENTS.z),
-                new Vector3(goldenFreddyPos.x + GOLDEN_FREDDY_HALF_EXTENTS.x, GOLDEN_FREDDY_HALF_EXTENTS.y * 2f, goldenFreddyPos.z + GOLDEN_FREDDY_HALF_EXTENTS.z)));
+                new Vector3(goldenFreddyPos.x + GOLDEN_FREDDY_HALF_EXTENTS.x, GOLDEN_FREDDY_HALF_EXTENTS.y * 2f, goldenFreddyPos.z + GOLDEN_FREDDY_HALF_EXTENTS.z));
+        collisionWorld.addStaticCollider(goldenFreddyColliderBox);
 
-        ObjetoInteractivo interactivoGoldenFreddy = new ObjetoInteractivo();
+        interactivoGoldenFreddy = new ObjetoInteractivo();
         interactivoGoldenFreddy.posicion.set(goldenFreddyPos.x, 1.1f, goldenFreddyPos.z);
         interactivoGoldenFreddy.radio = GOLDEN_FREDDY_RADIO_INTERACCION;
         interactivoGoldenFreddy.distanciaMaxima = GOLDEN_FREDDY_DISTANCIA_INTERACCION;
@@ -755,7 +775,7 @@ public class GameplayScreen implements Screen {
         // GIF real "IT'S ME" (pedido explicito del usuario 2026-08-11) para la fase ITSME de
         // Golden Freddy -- mismo patron exacto que el GIF de estatica de arriba (decodificado una
         // sola vez, recorrido en bucle durante DURACION_GOLDEN_FREDDY_ITSME).
-        Array<GifDecoder.Cuadro> cuadrosItsMeDecodificados = GifDecoder.decodificar(Gdx.files.internal(GIF_ITSME));
+        Array<GifDecoder.Cuadro> cuadrosItsMeDecodificados = GifDecoder.decodificar(Gdx.files.internal(GIF_ITSME), true);
         cuadrosItsMe = new Array<>();
         duracionesCuadroItsMe = new Array<>();
         for (GifDecoder.Cuadro cuadro : cuadrosItsMeDecodificados) {
@@ -1208,22 +1228,28 @@ public class GameplayScreen implements Screen {
             return;
         }
 
-        float dx = posicionJugador.x - mapDef.goldenFreddyX;
-        float dz = posicionJugador.z - mapDef.goldenFreddyZ;
-        boolean dentroDeRango = (dx * dx + dz * dz) <= GOLDEN_FREDDY_RANGO_PROXIMIDAD * GOLDEN_FREDDY_RANGO_PROXIMIDAD;
+        // Tras el jumpscare, el cuerpo desaparece (hacerDesaparecerCuerpoGoldenFreddy) y con el
+        // TODA reaccion a proximidad -- pedido explicito del usuario ("no debe: seguir activando
+        // proximidad; seguir reproduciendo GlitchGrave"). Unicamente el timer de repeticion de
+        // ITSME (mas abajo) sigue vivo, ya que es independiente de la posicion del jugador.
+        if (goldenFreddyCuerpoVisible) {
+            float dx = posicionJugador.x - mapDef.goldenFreddyX;
+            float dz = posicionJugador.z - mapDef.goldenFreddyZ;
+            boolean dentroDeRango = (dx * dx + dz * dz) <= GOLDEN_FREDDY_RANGO_PROXIMIDAD * GOLDEN_FREDDY_RANGO_PROXIMIDAD;
 
-        if (dentroDeRango && !goldenFreddyDentroDeRango) {
-            // Entrando en rango: un unico loop nuevo -- idSonidoGlitchGraveActivo siempre vuelve a
-            // -1 al salir de rango (abajo), asi que una reentrada rapida nunca puede arrancar un
-            // segundo loop encima de uno que ya seguia sonando.
-            idSonidoGlitchGraveActivo = sonidoGlitchGrave.loop(1f);
-        } else if (!dentroDeRango && goldenFreddyDentroDeRango && idSonidoGlitchGraveActivo != -1) {
-            sonidoGlitchGrave.stop(idSonidoGlitchGraveActivo);
-            idSonidoGlitchGraveActivo = -1;
+            if (dentroDeRango && !goldenFreddyDentroDeRango) {
+                // Entrando en rango: un unico loop nuevo -- idSonidoGlitchGraveActivo siempre vuelve a
+                // -1 al salir de rango (abajo), asi que una reentrada rapida nunca puede arrancar un
+                // segundo loop encima de uno que ya seguia sonando.
+                idSonidoGlitchGraveActivo = sonidoGlitchGrave.loop(GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE);
+            } else if (!dentroDeRango && goldenFreddyDentroDeRango && idSonidoGlitchGraveActivo != -1) {
+                sonidoGlitchGrave.stop(idSonidoGlitchGraveActivo);
+                idSonidoGlitchGraveActivo = -1;
+            }
+            goldenFreddyDentroDeRango = dentroDeRango;
+
+            actualizarCabezaGoldenFreddy(dt, dentroDeRango);
         }
-        goldenFreddyDentroDeRango = dentroDeRango;
-
-        actualizarCabezaGoldenFreddy(dt, dentroDeRango);
 
         if (goldenFreddyJumpscareYaOcurrido && goldenFreddyTiempoHastaProximoEfecto > 0f) {
             goldenFreddyTiempoHastaProximoEfecto -= dt;
@@ -1300,6 +1326,35 @@ public class GameplayScreen implements Screen {
         // el primer dibujarTexturaFullscreen ocurre en el primer frame de actualizarGoldenFreddyJumpscare,
         // llamado inmediatamente despues de esto en el mismo frame de render().
         idSonidoXscream2Activo = sonidoXscream2.play();
+        hacerDesaparecerCuerpoGoldenFreddy();
+    }
+
+    /** Retira POR COMPLETO el cuerpo fisico de Golden Freddy (pedido explicito del usuario
+     * 2026-08-11) -- se llama una unica vez, al arrancar el jumpscare, para que ni un solo frame
+     * de la escena congelada que se ve durante el fade/ItsMe (actualizarGoldenFreddyFade/ItsMe,
+     * que renderizan sceneManager de verdad) vuelva a mostrarlo sentado ahi. Ya no visible
+     * (sceneManager.removeScene), ya no bloquea (CollisionWorld.removeStaticCollider), ya no
+     * detectable por crosshair/E (ObjetoInteractivo.activo=false -- aunque interactuarConGoldenFreddy
+     * ya rechaza estado!=JUGANDO durante toda la secuencia, esto ademas lo bloquea de forma
+     * permanente el resto de la partida). Idempotente (guardado por goldenFreddyCuerpoVisible) --
+     * la repeticion periodica de ITSME (actualizarGoldenFreddy) nunca vuelve a llamar esto. */
+    private void hacerDesaparecerCuerpoGoldenFreddy() {
+        if (!goldenFreddyCuerpoVisible) {
+            return;
+        }
+        goldenFreddyCuerpoVisible = false;
+        if (entidadGoldenFreddy != null) {
+            ModelComponent modelo = Mappers.model.get(entidadGoldenFreddy);
+            if (modelo != null) {
+                sceneManager.removeScene(modelo.scene);
+            }
+        }
+        if (goldenFreddyColliderBox != null) {
+            collisionWorld.removeStaticCollider(goldenFreddyColliderBox);
+        }
+        if (interactivoGoldenFreddy != null) {
+            interactivoGoldenFreddy.activo = false;
+        }
     }
 
     private void actualizarGoldenFreddyJumpscare(float dt) {
@@ -1358,8 +1413,14 @@ public class GameplayScreen implements Screen {
         tiempoEnEstadoGoldenFreddy = 0f;
         indiceCuadroItsMe = 0;
         tiempoEnCuadroItsMe = 0f;
-        idSonidoRobotvoiceActivo = sonidoRobotvoice.play();
+        idSonidoRobotvoiceActivo = sonidoRobotvoice.play(GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE);
     }
+
+    /** Escala del GIF ItsMe respecto al alto de pantalla disponible (pedido explicito del usuario
+     * 2026-08-11: "mucho mas grande... sin deformarlo"). 0.97 en vez de 1.0 exacto -- deja un
+     * margen minimo para que nunca quede exactamente pegado a los bordes de la pantalla en
+     * resoluciones que no sean exactamente 16:9. */
+    private static final float GOLDEN_FREDDY_ITSME_ESCALA = 0.97f;
 
     private void actualizarGoldenFreddyItsMe(float dt) {
         tiempoEnEstadoGoldenFreddy += dt;
@@ -1369,7 +1430,33 @@ public class GameplayScreen implements Screen {
             tiempoEnCuadroItsMe -= duracionesCuadroItsMe.get(indiceCuadroItsMe);
             indiceCuadroItsMe = (indiceCuadroItsMe + 1) % cuadrosItsMe.size;
         }
-        dibujarTexturaFullscreen(cuadrosItsMe.get(indiceCuadroItsMe));
+
+        // Investigado 2026-08-11 ("el GIF aparece con fondo"): dos causas reales combinadas --
+        // (1) GifDecoder no componia el canvas real del GIF (ver esa clase, hallazgo de los
+        // cuadros de 1x1 con disposalMethod=restoreToBackgroundColor), ya corregido; (2)
+        // dibujarTexturaFullscreen hace glClear() y dibuja SIN blending, reemplazando toda la
+        // pantalla en vez de integrarse sobre la escena -- correcto para la estatica (que SI debe
+        // tapar todo) pero no para este efecto, que debe verse superpuesto a la escena congelada
+        // (mismo fondo que ya usa la fase de fundido). Aqui se dibuja la escena primero y el GIF
+        // ENCIMA respetando su alpha real.
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(0f);
+        sceneManager.render();
+
+        Texture cuadro = cuadrosItsMe.get(indiceCuadroItsMe);
+        float escalaAjuste = Math.min((float) Gdx.graphics.getWidth() / cuadro.getWidth(),
+                (float) Gdx.graphics.getHeight() / cuadro.getHeight()) * GOLDEN_FREDDY_ITSME_ESCALA;
+        float ancho = cuadro.getWidth() * escalaAjuste;
+        float alto = cuadro.getHeight() * escalaAjuste;
+        float x = (Gdx.graphics.getWidth() - ancho) / 2f;
+        float y = (Gdx.graphics.getHeight() - alto) / 2f;
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        uiBatch.begin();
+        uiBatch.draw(cuadro, x, y, ancho, alto);
+        uiBatch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
 
         if (tiempoEnEstadoGoldenFreddy >= DURACION_GOLDEN_FREDDY_ITSME) {
             sonidoRobotvoice.stop(idSonidoRobotvoiceActivo);

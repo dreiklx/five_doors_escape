@@ -144,4 +144,5 @@ public class FirstPersonCameraController {
         this.yawDegrees = yawDegreesNuevo;
         this.pitchDegrees = 0f;
     }
+
 }

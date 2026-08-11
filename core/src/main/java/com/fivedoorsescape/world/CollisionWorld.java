@@ -69,6 +69,13 @@ public class CollisionWorld {
         staticColliders.add(box);
     }
 
+    /** Retira un collider previamente agregado con addStaticCollider (comparacion por identidad,
+     * no por valor) -- usado por Golden Freddy para dejar de bloquear al jugador/guardias en
+     * cuanto desaparece tras su jumpscare (pedido explicito del usuario). */
+    public void removeStaticCollider(BoundingBox box) {
+        staticColliders.removeValue(box, true);
+    }
+
     public void addColliderSoloJugador(BoundingBox box) {
         collidersSoloJugador.add(box);
     }
