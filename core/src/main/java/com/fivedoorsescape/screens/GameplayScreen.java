@@ -254,14 +254,23 @@ public class GameplayScreen implements Screen {
     private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.65f, 0.9f, 0.65f);
     private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
     private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
-    /** Pedido explicito del usuario 2026-08-10/11: "GlitchGrave/robotvoice casi no se escuchan",
-     * y en la sesion siguiente, otra vez para GlitchGrave especificamente ("todavia esta demasiado
-     * bajo"). Ambos ya se reproducian con volumen 1.0 (el maximo NOMINAL de Sound.play()/loop())
-     * -- para subirlos de verdad hace falta pasar un valor MAYOR a 1.0 (OpenAL/libGDX lo permite,
-     * amplificando la ganancia real). GlitchGrave subido de nuevo (1.8->2.6) tras el pedido de
-     * "bastante mas presencia" -- robotvoice sin cambios esta sesion, no fue mencionado. */
-    private static final float GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE = 2.6f;
-    private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.9f;
+    /** Pedido explicito del usuario 2026-08-10/11/12: "GlitchGrave/robotvoice casi no se
+     * escuchan" (varias sesiones seguidas, incluso subiendo Sound.play()/loop() hasta 1.8/1.9 y
+     * despues 2.6). Investigado a fondo el WAV real (analisis de amplitud pico/RMS, no solo
+     * "subir el numero" a ciegas, pedido explicito del usuario): ambos archivos venian con un
+     * pico ya muy cerca de 0dBFS (glitch_grave -8.9dB, robotvoice -6.5dB en los primeros 4s que
+     * realmente suenan) pero un RMS/volumen PERCIBIDO muy bajo (-26.3dB / -21.6dB) -- una
+     * ganancia lineal en Sound.play() YA estaba, o casi, en el limite antes de recortar/distorsionar
+     * los picos (2.6x llevaba el pico de glitch_grave a -0.6dB, practicamente al techo). Subir mas
+     * el numero habria distorsionado, exactamente lo que el usuario pidio no hacer. La causa real
+     * era el propio archivo .wav: mayormente silencio real (ruido de fondo bajo -77dB, confirmado
+     * silencio digital, no ruido audible) con picos breves -- un problema de RANGO DINAMICO, no de
+     * ganancia. Corregido procesando los .wav (nivelado/compresion + normalizacion de pico a un
+     * techo seguro) -- ver CLAUDE.md para el detalle real -- subiendo el RMS +4dB/+5.5dB sin tocar
+     * el formato/duracion/canal. Con el archivo ya mas fuerte por si solo, el volumen en codigo baja
+     * a un valor modesto (deja margen real sin recortar, no al limite como antes). */
+    private static final float GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE = 1.05f;
+    private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.25f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
         CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE }
@@ -290,6 +299,11 @@ public class GameplayScreen implements Screen {
     /** Referencia directa a Freddy (no a "el guardia mas cercano") -- necesaria para la musica
      * espacial, que debe sonar desde Freddy especificamente, nunca desde Bonnie/Chica/Foxy. */
     private Entity freddyEntity;
+    /** Punto de spawn REAL de Freddy elegido esta partida (uno de 4 candidatos reales, ver show())
+     * -- usado tanto para crear su entidad como para apuntar la camara de la cinematica inicial
+     * hacia donde de verdad esta parado, nunca hacia el spawn original fijo si se eligio otro. */
+    private float freddyStartElegidoX;
+    private float freddyStartElegidoZ;
 
     private Cubemap diffuseCubemap;
     private Cubemap environmentCubemap;
@@ -561,7 +575,42 @@ public class GameplayScreen implements Screen {
         // Freddy es el enemigo principal (decision de diseno del usuario 2026-08-03): persigue al
         // jugador de forma continua durante toda la partida (AIComponent.siempreEnPersecucion),
         // sin esperar a entrar en rangoDeteccion como los demas.
-        Vector3 freddyStart = new Vector3(mapDef.freddyStartX, 0f, mapDef.freddyStartZ);
+        //
+        // Variacion real de aproximacion (pedido explicito del usuario 2026-08-12: "Freddy
+        // termina llegando casi siempre por la derecha"). Investigado antes de tocar nada:
+        // ChaseState (ver ese archivo) no tiene pathfinding ni logica de seleccion de puertas --
+        // es persecucion en linea recta directa hacia la posicion actual del jugador, resuelta
+        // contra colision eje por eje. El sesgo NO viene de la IA en si -- viene de que el spawn
+        // de Freddy era un UNICO punto fijo (freddyStartX/Z) combinado con un spawn de jugador
+        // tambien fijo, asi que el angulo relativo inicial (y por lo tanto el lado por el que
+        // "tiende" a acercarse durante gran parte de la partida) era identico en todas las
+        // partidas. Solucion limpia, sin tocar ChaseState/IdleState/CaughtState ni introducir
+        // aleatoriedad por frame: elegir UNA VEZ, al cargar la partida, entre 4 puntos de spawn
+        // reales en zonas del edificio bien separadas (ver freddyStartAltX1-3/Z1-3, cada uno
+        // verificado libre de colision con un escaneo real en grilla, nunca coordenadas
+        // inventadas) -- el resto de la logica de persecucion/colision/atasco sigue exactamente
+        // igual sea cual sea el punto elegido.
+        int freddyCandidatoElegido = MathUtils.random(3);
+        switch (freddyCandidatoElegido) {
+            case 1:
+                freddyStartElegidoX = mapDef.freddyStartAltX1;
+                freddyStartElegidoZ = mapDef.freddyStartAltZ1;
+                break;
+            case 2:
+                freddyStartElegidoX = mapDef.freddyStartAltX2;
+                freddyStartElegidoZ = mapDef.freddyStartAltZ2;
+                break;
+            case 3:
+                freddyStartElegidoX = mapDef.freddyStartAltX3;
+                freddyStartElegidoZ = mapDef.freddyStartAltZ3;
+                break;
+            default:
+                freddyStartElegidoX = mapDef.freddyStartX;
+                freddyStartElegidoZ = mapDef.freddyStartZ;
+                break;
+        }
+        Vector3 freddyStart = new Vector3(freddyStartElegidoX, 0f, freddyStartElegidoZ);
+        warnIfEmbedded("Freddy", freddyStart, new Vector3(0.3f, 0.9f, 0.3f));
         numBones = Math.max(numBones, crearGuardia(factory, "freddy", freddyStart, "Freddy", true));
 
         // Bonnie/Chica/Foxy: guardias estaticos en un punto fijo (IdleState -- no patrullan, ver
@@ -609,7 +658,7 @@ public class GameplayScreen implements Screen {
         // atravesar su cuerpo -- los otros guardias ya resuelven su propio movimiento contra
         // collisionWorld (ChaseState), asi que este collider nuevo los afecta automaticamente sin
         // ningun cambio adicional en su logica.
-        Vector3 goldenFreddyPos = new Vector3(mapDef.goldenFreddyX, 0f, mapDef.goldenFreddyZ);
+        Vector3 goldenFreddyPos = new Vector3(mapDef.goldenFreddyX, mapDef.goldenFreddyY, mapDef.goldenFreddyZ);
         entidadGoldenFreddy = factory.createEntity("golden_freddy", goldenFreddyPos, mapDef.goldenFreddyYawDegrees);
         numBones = Math.max(numBones, assets.getModel(registry.getEntityDefinition("golden_freddy").modelPath).maxBones);
         warnIfEmbedded("GoldenFreddy", goldenFreddyPos, GOLDEN_FREDDY_HALF_EXTENTS);
@@ -1747,6 +1796,29 @@ public class GameplayScreen implements Screen {
     private Vector3[] tomaObjInicio;
     private Vector3[] tomaObjFin;
 
+    /** Busca en tiempo real una posicion de camara real, libre de colision, cerca de un objetivo
+     * (pedido explicito del usuario 2026-08-12, ver seleccion de spawn de Freddy en show()) --
+     * nunca inventa coordenadas: prueba el mismo offset "(-X,+Z)" ya usado para los 4 personajes
+     * originales primero, y si esa direccion especifica esta bloqueada en la sala real donde le
+     * tocaba aparecer esta partida, prueba variantes de respaldo (otros 3 cuadrantes, luego
+     * directamente arriba del objetivo como ultimo recurso) hasta encontrar una real y verificada
+     * con CollisionWorld.overlapsStatic contra el mapa ya cargado. */
+    private Vector3 buscarPosicionCamaraSegura(float objetivoX, float objetivoZ, float altura) {
+        float[][] offsets = {
+                {-1f, 2f}, {1f, 2f}, {-1f, -2f}, {1f, -2f}, {0f, 1.5f}, {0f, -1.5f}, {0f, 0f},
+        };
+        Vector3 mitadCamara = new Vector3(0.25f, 0.25f, 0.25f);
+        for (float[] offset : offsets) {
+            Vector3 candidato = new Vector3(objetivoX + offset[0], altura, objetivoZ + offset[1]);
+            if (!collisionWorld.overlapsStatic(candidato, mitadCamara)) {
+                return candidato;
+            }
+        }
+        // Ultimo recurso (nunca deberia llegar aqui si el spawn en si es real y libre): directamente
+        // sobre el objetivo, mismo criterio ya usado como respaldo.
+        return new Vector3(objetivoX, altura, objetivoZ);
+    }
+
     /** Construye la cinematica una sola vez (en show(), con mapDef ya cargado) como 5 TOMAS
      * independientes tipo "camara de seguridad" (una por animatronico + retorno), con CORTE DURO
      * (fundido a negro breve) entre cada una, en vez de un unico recorrido continuo.
@@ -1781,13 +1853,25 @@ public class GameplayScreen implements Screen {
         Vector3 foxyPos = new Vector3(-9.5f, 1.7f, 0.4f);
         Vector3 bonniePos = new Vector3(-8.5f, 1.7f, 7.3f);
         Vector3 chicaPos = new Vector3(4f, 1.7f, 3f);
-        Vector3 freddyPos = new Vector3(6f, 1.7f, -2f);
+        // freddyPos ya no es un valor fijo (pedido explicito del usuario 2026-08-12: variar el
+        // spawn real de Freddy, ver show()) -- si se eligio el spawn original, se conserva el
+        // mismo encuadre ya verificado de siempre; si se eligio uno de los 3 alternativos, se
+        // busca en tiempo real una posicion de camara libre de colision cerca de ese punto (nunca
+        // inventada a ciegas), con el mismo patron "(-X,+Z) desde el spawn" ya usado para los
+        // otros 3 personajes, mas variantes de respaldo si esa direccion especifica esta bloqueada
+        // en la sala donde le toco aparecer esta partida.
+        Vector3 freddyPos;
+        if (freddyStartElegidoX != mapDef.freddyStartX || freddyStartElegidoZ != mapDef.freddyStartZ) {
+            freddyPos = buscarPosicionCamaraSegura(freddyStartElegidoX, freddyStartElegidoZ, 1.7f);
+        } else {
+            freddyPos = new Vector3(6f, 1.7f, -2f);
+        }
         Vector3 finalPos = new Vector3(mapDef.playerStartX, 1.7f, mapDef.playerStartZ - 1f);
 
         Vector3 foxyObj = new Vector3(mapDef.foxyStartX, alturaMirada, mapDef.foxyStartZ);
         Vector3 bonnieObj = new Vector3(mapDef.bonnieStartX, alturaMirada, mapDef.bonnieStartZ);
         Vector3 chicaObj = new Vector3(mapDef.chicaStartX, alturaMirada, mapDef.chicaStartZ);
-        Vector3 freddyObj = new Vector3(mapDef.freddyStartX, alturaMirada, mapDef.freddyStartZ);
+        Vector3 freddyObj = new Vector3(freddyStartElegidoX, alturaMirada, freddyStartElegidoZ);
         // Ojo: la salita de inicio del jugador esta encerrada por una pared en Z=7 (confirmada
         // por grilla de colision) -- el objetivo de esta ultima toma debe quedarse DENTRO de esa
         // salita (Z=8..10 libres), no apuntar mas alla de la pared como en un primer intento.

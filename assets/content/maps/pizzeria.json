@@ -9,6 +9,12 @@
     "playerStartYawDegrees": 180.0,
     "freddyStartX": 7.0,
     "freddyStartZ": -4.0,
+    "freddyStartAltX1": -11.0,
+    "freddyStartAltZ1": 3.0,
+    "freddyStartAltX2": 0.0,
+    "freddyStartAltZ2": 6.0,
+    "freddyStartAltX3": -8.0,
+    "freddyStartAltZ3": -9.0,
     "exitX": -8.87,
     "exitZ": -6.32,
     "exitRadius": 0.75,
@@ -27,7 +33,8 @@
     "keyY": 0.762,
     "keyZ": 6.2545,
     "keyYawDegrees": 25.0,
-    "goldenFreddyX": 11.0,
-    "goldenFreddyZ": 0.5,
+    "goldenFreddyX": 10.75,
+    "goldenFreddyY": -0.5,
+    "goldenFreddyZ": 0.6,
     "goldenFreddyYawDegrees": -90.0
 }
