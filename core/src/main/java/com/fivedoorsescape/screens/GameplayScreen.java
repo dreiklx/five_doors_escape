@@ -250,7 +250,15 @@ public class GameplayScreen implements Screen {
     private static final float DURACION_GOLDEN_FREDDY_FADE = 2f;
     private static final float DURACION_GOLDEN_FREDDY_ITSME = 4f;
     private static final float GOLDEN_FREDDY_INTERVALO_REPETICION = 24f;
-    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 1f;
+    /** Pedido explicito del usuario 2026-08-15: "el rango es demasiado corto, quiero que el
+     * jugador empiece a notar el comportamiento desde una distancia mayor" -- pero "no enorme,
+     * debe seguir sintiendose como una zona de proximidad cercana". Subido 1.0 -> 1.8 (casi el
+     * doble, pero se queda por debajo de GOLDEN_FREDDY_DISTANCIA_INTERACCION=2.2, asi que el
+     * jugador siempre nota el glitch de cabeza/GlitchGrave ANTES de estar lo bastante cerca para
+     * interactuar con E -- nunca al reves). GlitchGrave usa exactamente este mismo campo
+     * (dentroDeRango en actualizarGoldenFreddy), asi que sigue sincronizado automaticamente sin
+     * tocar nada mas. */
+    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 1.8f;
     private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.65f, 0.9f, 0.65f);
     private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
     private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
@@ -1796,39 +1804,62 @@ public class GameplayScreen implements Screen {
     private Vector3[] tomaObjInicio;
     private Vector3[] tomaObjFin;
 
-    /** Busca en tiempo real una posicion de camara real, libre de colision Y CON LINEA DE VISION
-     * REALMENTE DESPEJADA hacia el objetivo (pedido explicito del usuario 2026-08-12, ver
-     * seleccion de spawn de Freddy en show()) -- nunca inventa coordenadas: prueba el mismo offset
-     * "(-X,+Z)" ya usado para los 4 personajes originales primero, y si esa direccion especifica
-     * esta bloqueada (o simplemente tapada) en la sala real donde le tocaba aparecer esta partida,
-     * prueba variantes de respaldo (otros 3 cuadrantes, luego directamente arriba del objetivo
-     * como ultimo recurso) hasta encontrar una real y verificada.
+    /** Busca en tiempo real una posicion de camara real, libre de colision Y con linea de vision
+     * REALMENTE despejada hacia el objetivo (pedido explicito del usuario 2026-08-12, ver
+     * seleccion de spawn de Freddy en show()) -- nunca inventa coordenadas: escanea distancias y
+     * angulos crecientes alrededor del objetivo hasta encontrar una posicion real y verificada con
+     * CollisionWorld.overlapsStatic + lineaDeVisionLibre.
      *
-     * CAUSA RAIZ REAL de "Freddy no aparece" (investigacion 2026-08-14): la version original de
-     * esta funcion solo llamaba a CollisionWorld.overlapsStatic() sobre la posicion de la CAMARA
-     * en si -- nunca comprobaba si el trayecto recto entre la camara y el objetivo pasaba a traves
-     * de mobiliario/paredes de por medio. Reproducido en vivo con captura real: con el candidato de
-     * spawn alternativo (0.0, 6.0), el primer offset probado ((-1,+2) => camara en (-1, 1.7, 8.0))
-     * no esta incrustado, pero un monitor CRT de la oficina (modelado como decoracion suelta, no
-     * como pared) queda exactamente en medio -- la toma de la cinematica inicial mostraba el
-     * monitor a pantalla completa, cero Freddy visible, en la MAYORIA de las partidas nuevas (3 de
-     * los 4 candidatos de spawn usan esta funcion; solo el candidato original usa el encuadre fijo
-     * ya verificado a mano). Corregido exigiendo tambien CollisionWorld.lineaDeVisionLibre() --
-     * mismo patron de escaneo real ya usado en el resto del proyecto, no una heuristica nueva. */
+     * CAUSA RAIZ REAL #1 de "Freddy no aparece" (investigacion 2026-08-14): la version original
+     * solo llamaba a overlapsStatic() sobre la posicion de la CAMARA -- nunca comprobaba si el
+     * trayecto hacia el objetivo pasaba a traves de mobiliario suelto (p.ej. un monitor de
+     * oficina). Corregido exigiendo tambien lineaDeVisionLibre().
+     *
+     * CAUSA RAIZ REAL #2 de "la cinematica se ve rara", parte 1 -- orientacion (re-investigacion
+     * 2026-08-15, reproduciendo la cinematica COMPLETA en vivo con capturas en 3 puntos de
+     * progreso, no un solo frame): encontrar una camara real y despejada no garantiza que Freddy
+     * quede DE FRENTE a ella. Durante CINEMATICA_INICIAL, AISystem se excluye del engine a proposito
+     * (ver posicionarModelosParaCinematica) para que ChaseState nunca rote a Freddy mientras esta
+     * congelado -- su yaw se queda en el valor con el que se creo. La solucion real no es forzar un
+     * lado -- es no asumir cual lado es "el frente": ver construirRutaCinematicaInicial(), que ahora
+     * ROTA a Freddy para que mire hacia la camara real que esta funcion encontro, sea cual sea el
+     * lado. Esta funcion solo necesita devolver cualquier posicion real, despejada y con vision
+     * libre.
+     *
+     * CAUSA RAIZ REAL #2, parte 2 -- cobertura de la busqueda: con una lista fija de ~13 offsets
+     * candidatos, el candidato de spawn (-8,-9) no encontraba NINGUNO valido y caia al ultimo
+     * recurso (camara exactamente sobre Freddy) -- confirmado en captura real: la camara terminaba
+     * literalmente dentro de su propia malla, un cuadro irreconocible (huecos negros, geometria sin
+     * sentido), el sintoma mas severo de "la cinematica se ve rara". Un barrido real de 861 puntos
+     * (radio 5, todas las alturas) encontro 135 posiciones reales con linea de vision libre para
+     * ese mismo candidato -- todas en una franja angosta (aprox. Z=-9.5) que ninguno de los offsets
+     * fijos probaba. Una lista fija de offsets no puede cubrir aberturas angostas e impredecibles
+     * como esta en cada sala del mapa. Reemplazado por un escaneo real por distancia/angulo
+     * creciente (mismo patron de escaneo real ya usado en todo el proyecto, ahora en tiempo real en
+     * vez de offline) -- prueba primero las distancias mas cercanas (mejor encuadre) en 24
+     * direcciones, y solo se aleja si hace falta, hasta un radio de 6 unidades. */
     private Vector3 buscarPosicionCamaraSegura(float objetivoX, float objetivoZ, float altura, float objetivoAltura) {
-        float[][] offsets = {
-                {-1f, 2f}, {1f, 2f}, {-1f, -2f}, {1f, -2f}, {0f, 1.5f}, {0f, -1.5f}, {0f, 0f},
-        };
         Vector3 mitadCamara = new Vector3(0.25f, 0.25f, 0.25f);
         Vector3 objetivo = new Vector3(objetivoX, objetivoAltura, objetivoZ);
-        for (float[] offset : offsets) {
-            Vector3 candidato = new Vector3(objetivoX + offset[0], altura, objetivoZ + offset[1]);
-            if (!collisionWorld.overlapsStatic(candidato, mitadCamara)
-                    && collisionWorld.lineaDeVisionLibre(candidato, objetivo)) {
-                return candidato;
+        float[] distancias = {1.2f, 1.6f, 2f, 2.5f, 3f, 4f, 5f, 6f};
+        int direcciones = 24;
+        for (float distancia : distancias) {
+            for (int i = 0; i < direcciones; i++) {
+                float anguloRad = (float) (i * 2f * Math.PI / direcciones);
+                // Mismo convenio de yaw que RenderSyncSystem/ChaseState (Ry(theta), atan2(dx,dz)):
+                // dx=sin, dz=cos, para que el angulo resultante sea directamente reutilizable como
+                // yaw en construirRutaCinematicaInicial().
+                float dx = MathUtils.sin(anguloRad) * distancia;
+                float dz = MathUtils.cos(anguloRad) * distancia;
+                Vector3 candidato = new Vector3(objetivoX + dx, altura, objetivoZ + dz);
+                if (!collisionWorld.overlapsStatic(candidato, mitadCamara)
+                        && collisionWorld.lineaDeVisionLibre(candidato, objetivo)) {
+                    return candidato;
+                }
             }
         }
-        // Ultimo recurso (nunca deberia llegar aqui si el spawn en si es real y libre): directamente
+        // Ultimo recurso (nunca deberia llegar aqui si el spawn en si es real y libre -- ninguno
+        // de los 4 candidatos lo necesito en la verificacion en vivo de esta sesion): directamente
         // sobre el objetivo, mismo criterio ya usado como respaldo.
         return new Vector3(objetivoX, altura, objetivoZ);
     }
@@ -1874,9 +1905,29 @@ public class GameplayScreen implements Screen {
         // inventada a ciegas), con el mismo patron "(-X,+Z) desde el spawn" ya usado para los
         // otros 3 personajes, mas variantes de respaldo si esa direccion especifica esta bloqueada
         // en la sala donde le toco aparecer esta partida.
+        boolean freddyEsCandidatoOriginal = freddyStartElegidoX == mapDef.freddyStartX && freddyStartElegidoZ == mapDef.freddyStartZ;
         Vector3 freddyPos;
-        if (freddyStartElegidoX != mapDef.freddyStartX || freddyStartElegidoZ != mapDef.freddyStartZ) {
+        if (!freddyEsCandidatoOriginal) {
             freddyPos = buscarPosicionCamaraSegura(freddyStartElegidoX, freddyStartElegidoZ, 1.7f, alturaMirada);
+            // CAUSA RAIZ REAL #3 (re-investigacion 2026-08-15, reproduciendo la cinematica COMPLETA
+            // en vivo, no un solo frame): en salas chicas/con mobiliario (confirmado con un barrido
+            // real de 405 puntos para el candidato de la oficina, (0,6): CERO posiciones con Z
+            // positiva -- osea "de frente", dado que Freddy siempre mira a +Z congelado durante la
+            // cinematica -- tienen linea de vision libre; las 126 posiciones validas encontradas
+            // estan TODAS del lado sur) no existe ningun angulo de camara que caiga dentro del cono
+            // frontal fijo de Freddy (yaw=0 congelado, ver posicionarModelosParaCinematica) -- la
+            // busqueda de camara solo puede garantizar una posicion real y despejada, nunca que esa
+            // posicion coincida con su frente. En vez de asumir un frente fijo, se ROTA A FREDDY
+            // (solo su TransformComponent.yawDegrees, antes del unico engine.update(0f) que fija su
+            // pose para la cinematica) para que mire hacia la camara real que se encontro, sea cual
+            // sea el lado. Esto no afecta el gameplay real: en el primer frame de JUGANDO,
+            // ChaseState.update() recalcula su yaw desde cero en base a la posicion real del
+            // jugador (mismo atan2(dx,dz) usado aqui), sobreescribiendo este valor temporal por
+            // completo -- confirmado leyendo ChaseState, no hay ningun otro lugar que lea
+            // yawDegrees antes de esa primera pasada real de IA.
+            float dx = freddyPos.x - freddyStartElegidoX;
+            float dz = freddyPos.z - freddyStartElegidoZ;
+            Mappers.transform.get(freddyEntity).yawDegrees = MathUtils.atan2(dx, dz) * MathUtils.radiansToDegrees;
         } else {
             freddyPos = new Vector3(6f, 1.7f, -2f);
         }
@@ -1905,12 +1956,22 @@ public class GameplayScreen implements Screen {
                 foxyPos, bonniePos, chicaPos, freddyPos, finalPos,
         };
         // El objetivo arranca ligeramente desviado del animatronico -- la camara "lo encuentra"
-        // girando un poco durante la toma, en vez de arrancar ya centrado en el.
+        // girando un poco durante la toma, en vez de arrancar ya centrado en el. Ese offset fijo
+        // (0.7, 0.9) se calibro a mano para la distancia de camara original (~2.24 unidades) --
+        // con una camara encontrada por buscarPosicionCamaraSegura() a veces mucho mas cerca
+        // (radio minimo probado: 1.2 unidades, ver esa funcion), el mismo offset absoluto es
+        // desproporcionado: confirmado en captura real (candidato -8,-9, camara a 1.2u) que el
+        // primer frame de la toma mostraba solo una mano en la esquina, casi nada de Freddy en
+        // cuadro. Para los candidatos alternativos (camara calculada, distancia variable) se usa
+        // el objetivo centrado desde el primer frame -- sin el efecto de "panning" cosmetico, pero
+        // siempre correctamente encuadrado sea cual sea la distancia real encontrada. El candidato
+        // original conserva el offset ya verificado a mano, sin cambios.
+        Vector3 freddyObjInicio = freddyEsCandidatoOriginal ? new Vector3(freddyObj).add(0.7f, 0f, 0.9f) : new Vector3(freddyObj);
         tomaObjInicio = new Vector3[] {
                 new Vector3(foxyObj).add(0.7f, 0f, 0.6f),
                 new Vector3(bonnieObj).add(-0.8f, 0f, 0.9f),
                 new Vector3(chicaObj).add(-0.9f, 0f, 0.7f),
-                new Vector3(freddyObj).add(0.7f, 0f, 0.9f),
+                freddyObjInicio,
                 new Vector3(finalObj).add(1.2f, 0f, 0f),
         };
         tomaObjFin = new Vector3[] {
