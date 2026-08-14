@@ -253,19 +253,18 @@ public class GameplayScreen implements Screen {
     /** Pedido explicito del usuario 2026-08-15 (sesion anterior): "el rango es demasiado corto" --
      * subido 1.0 -> 1.8. Pedido explicito del usuario 2026-08-16 (sesion posterior, tras probarlo
      * en vivo): "quiero que sea un poco mas largo que los 1.8u actuales... de manera razonable, sin
-     * hacerlo exageradamente grande" -- subido 1.8 -> 2.5 (+39%, notoriamente mayor sin llegar a
-     * cubrir medio pasillo). Deliberadamente ya NO se queda por debajo de
-     * GOLDEN_FREDDY_DISTANCIA_INTERACCION=2.2 -- pedido explicito de esta sesion: "que el jugador
-     * pueda empezar a notar que algo esta mal... desde una distancia claramente mayor, antes de
-     * llegar demasiado cerca", lo que en la practica significa notarlo ANTES de estar lo bastante
-     * cerca para interactuar con E, exactamente lo que este rango mas amplio logra ahora. La
+     * hacerlo exageradamente grande" -- subido 1.8 -> 2.5. Pedido explicito del usuario 2026-08-17
+     * (sesion posterior, ajuste rapido): "un poco mas largo que el actual 2.5u... de forma
+     * moderada, sin exagerar" -- subido 2.5 -> 3.1 (+24%). Deliberadamente ya NO se queda por
+     * debajo de GOLDEN_FREDDY_DISTANCIA_INTERACCION=2.2 (desde la sesion anterior) -- el jugador
+     * nota el glitch ANTES de estar lo bastante cerca para interactuar con E, nunca al reves. La
      * interaccion E sigue siendo completamente independiente de este rango (ver
      * interactuarConGoldenFreddy(), solo depende de goldenFreddyCuerpoVisible/estado, nunca de
      * goldenFreddyDentroDeRango) -- funciona igual sin importar la distancia real, siempre que este
      * dentro de GOLDEN_FREDDY_DISTANCIA_INTERACCION. GlitchGrave usa exactamente este mismo campo
      * (dentroDeRango en actualizarGoldenFreddy), asi que sigue sincronizado automaticamente sin
      * tocar nada mas. */
-    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 2.5f;
+    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 3.1f;
     private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.65f, 0.9f, 0.65f);
     private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
     private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
@@ -273,19 +272,24 @@ public class GameplayScreen implements Screen {
      * escuchan" (varias sesiones seguidas, incluso subiendo Sound.play()/loop() hasta 1.8/1.9 y
      * despues 2.6). Investigado a fondo el WAV real (analisis de amplitud pico/RMS, no solo
      * "subir el numero" a ciegas, pedido explicito del usuario): ambos archivos venian con un
-     * pico ya muy cerca de 0dBFS (glitch_grave -8.9dB, robotvoice -6.5dB en los primeros 4s que
-     * realmente suenan) pero un RMS/volumen PERCIBIDO muy bajo (-26.3dB / -21.6dB) -- una
-     * ganancia lineal en Sound.play() YA estaba, o casi, en el limite antes de recortar/distorsionar
-     * los picos (2.6x llevaba el pico de glitch_grave a -0.6dB, practicamente al techo). Subir mas
-     * el numero habria distorsionado, exactamente lo que el usuario pidio no hacer. La causa real
-     * era el propio archivo .wav: mayormente silencio real (ruido de fondo bajo -77dB, confirmado
-     * silencio digital, no ruido audible) con picos breves -- un problema de RANGO DINAMICO, no de
-     * ganancia. Corregido procesando los .wav (nivelado/compresion + normalizacion de pico a un
-     * techo seguro) -- ver CLAUDE.md para el detalle real -- subiendo el RMS +4dB/+5.5dB sin tocar
-     * el formato/duracion/canal. Con el archivo ya mas fuerte por si solo, el volumen en codigo baja
-     * a un valor modesto (deja margen real sin recortar, no al limite como antes). */
-    private static final float GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE = 1.05f;
-    private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.25f;
+     * pico ya muy cerca de 0dBFS pero un RMS/volumen PERCIBIDO muy bajo -- un problema de RANGO
+     * DINAMICO, no de ganancia. Corregido procesando los .wav (nivelado/compresion + normalizacion
+     * de pico a un techo seguro) -- ver CLAUDE.md para el detalle real -- tras lo cual el volumen
+     * en codigo se dejo en un valor modesto (1.05/1.25) que dejaba margen real sin recortar.
+     *
+     * Pedido explicito del usuario 2026-08-17 (sesion posterior, ajuste rapido, sin reprocesar los
+     * .wav de nuevo): "todavia se escuchan demasiado bajos, sube el volumen de nuevo, aumento
+     * razonable". Subido GlitchGrave 1.05->1.3 y robotvoice 1.25->1.5. AVISO REAL (no verificado
+     * por oido humano, esta sesion no reprocesa los .wav): segun las mediciones de pico ya
+     * documentadas de la sesion que proceso los archivos (glitch_grave normalizado a pico -1.0dB,
+     * robotvoice a -2.4dB), el margen antes de recortar a estos multiplicadores nuevos es de solo
+     * ~1-1.5dB por encima de 0dBFS en los picos mas fuertes -- es decir, este aumento puede
+     * introducir un recorte leve y breve en los picos (no un recorte sostenido, la mayor parte de
+     * la señal sigue siendo silencio real). Es la unica forma de subir el volumen percibido mas
+     * alla sin reprocesar el archivo de nuevo -- si esto suena distorsionado, el siguiente paso
+     * real seria volver a nivelar/normalizar los .wav (no solo subir este numero otra vez). */
+    private static final float GOLDEN_FREDDY_VOLUMEN_GLITCH_GRAVE = 1.3f;
+    private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.5f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
         CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE }
