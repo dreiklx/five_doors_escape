@@ -250,15 +250,22 @@ public class GameplayScreen implements Screen {
     private static final float DURACION_GOLDEN_FREDDY_FADE = 2f;
     private static final float DURACION_GOLDEN_FREDDY_ITSME = 4f;
     private static final float GOLDEN_FREDDY_INTERVALO_REPETICION = 24f;
-    /** Pedido explicito del usuario 2026-08-15: "el rango es demasiado corto, quiero que el
-     * jugador empiece a notar el comportamiento desde una distancia mayor" -- pero "no enorme,
-     * debe seguir sintiendose como una zona de proximidad cercana". Subido 1.0 -> 1.8 (casi el
-     * doble, pero se queda por debajo de GOLDEN_FREDDY_DISTANCIA_INTERACCION=2.2, asi que el
-     * jugador siempre nota el glitch de cabeza/GlitchGrave ANTES de estar lo bastante cerca para
-     * interactuar con E -- nunca al reves). GlitchGrave usa exactamente este mismo campo
+    /** Pedido explicito del usuario 2026-08-15 (sesion anterior): "el rango es demasiado corto" --
+     * subido 1.0 -> 1.8. Pedido explicito del usuario 2026-08-16 (sesion posterior, tras probarlo
+     * en vivo): "quiero que sea un poco mas largo que los 1.8u actuales... de manera razonable, sin
+     * hacerlo exageradamente grande" -- subido 1.8 -> 2.5 (+39%, notoriamente mayor sin llegar a
+     * cubrir medio pasillo). Deliberadamente ya NO se queda por debajo de
+     * GOLDEN_FREDDY_DISTANCIA_INTERACCION=2.2 -- pedido explicito de esta sesion: "que el jugador
+     * pueda empezar a notar que algo esta mal... desde una distancia claramente mayor, antes de
+     * llegar demasiado cerca", lo que en la practica significa notarlo ANTES de estar lo bastante
+     * cerca para interactuar con E, exactamente lo que este rango mas amplio logra ahora. La
+     * interaccion E sigue siendo completamente independiente de este rango (ver
+     * interactuarConGoldenFreddy(), solo depende de goldenFreddyCuerpoVisible/estado, nunca de
+     * goldenFreddyDentroDeRango) -- funciona igual sin importar la distancia real, siempre que este
+     * dentro de GOLDEN_FREDDY_DISTANCIA_INTERACCION. GlitchGrave usa exactamente este mismo campo
      * (dentroDeRango en actualizarGoldenFreddy), asi que sigue sincronizado automaticamente sin
      * tocar nada mas. */
-    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 1.8f;
+    private static final float GOLDEN_FREDDY_RANGO_PROXIMIDAD = 2.5f;
     private static final Vector3 GOLDEN_FREDDY_HALF_EXTENTS = new Vector3(0.65f, 0.9f, 0.65f);
     private static final float GOLDEN_FREDDY_RADIO_INTERACCION = 0.7f;
     private static final float GOLDEN_FREDDY_DISTANCIA_INTERACCION = 2.2f;
@@ -1589,6 +1596,48 @@ public class GameplayScreen implements Screen {
      */
     private static final float CROSSHAIR_CONTORNO_EXTRA = 2.0f;
 
+    /** Escala del texto de interaccion respecto a la escala base de uiFont (1.3, ver show()) --
+     * deliberadamente menor que el texto normal (llave/pausa/ayuda) para que se sienta como un
+     * hint discreto de HUD de terror, no un mensaje central llamativo. Offset vertical: lo bastante
+     * separado del crosshair (radio maximo CROSSHAIR_RADIO_ACTIVO=5.5 + contorno) para no
+     * superponerse ni tapar el centro de la pantalla. */
+    private static final float ESCALA_TEXTO_INTERACCION = 0.85f;
+    private static final float TEXTO_INTERACCION_OFFSET_Y = 34f;
+
+    /** Texto "Presiona E para interactuar"/"Press E to interact" (pedido explicito del usuario
+     * 2026-08-15) -- aparece unicamente cuando objetivoInteractivoActual no es null, es decir,
+     * cuando el MISMO raycast real que ya decide si "E" hace algo (actualizarInteraccion(),
+     * Intersector.intersectRaySphere contra objetosInteractivos) esta apuntando a un objeto
+     * interactuable activo. Nunca un chequeo de distancia/proximidad independiente -- funciona
+     * automaticamente con la llave, Golden Freddy y la puerta de salida (los 3 unicos miembros de
+     * objetosInteractivos hoy) sin condiciones por objeto, y con cualquier interactivo futuro que
+     * se agregue a esa misma lista. */
+    private void dibujarTextoInteraccion() {
+        if (objetivoInteractivoActual == null) {
+            return;
+        }
+        String texto = Lang.get(handoff.idioma, "interact.prompt");
+        float escalaOriginal = uiFont.getScaleX();
+        uiFont.getData().setScale(ESCALA_TEXTO_INTERACCION);
+        GlyphLayout layout = new GlyphLayout(uiFont, texto);
+        float x = Gdx.graphics.getWidth() / 2f - layout.width / 2f;
+        float y = Gdx.graphics.getHeight() / 2f - TEXTO_INTERACCION_OFFSET_Y;
+
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiBatch.begin();
+        // Sombra sutil de contraste (mismo criterio ya usado para el crosshair contra fondos
+        // claros) en vez de una caja de fondo -- mantiene el texto discreto, sin ocupar espacio
+        // extra en pantalla.
+        uiFont.setColor(0f, 0f, 0f, 0.85f);
+        uiFont.draw(uiBatch, layout, x + 1f, y - 1f);
+        uiFont.setColor(Color.WHITE);
+        uiFont.draw(uiBatch, layout, x, y);
+        uiBatch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+        uiFont.getData().setScale(escalaOriginal);
+    }
+
     private void dibujarCrosshair() {
         float cx = Gdx.graphics.getWidth() / 2f;
         float cy = Gdx.graphics.getHeight() / 2f;
@@ -1764,6 +1813,7 @@ public class GameplayScreen implements Screen {
             return;
         }
         dibujarCrosshair();
+        dibujarTextoInteraccion();
         dibujarMensajeLlave(dt);
 
         dibujarAyudaInicial(dt);
