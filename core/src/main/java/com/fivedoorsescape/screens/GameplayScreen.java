@@ -1796,21 +1796,35 @@ public class GameplayScreen implements Screen {
     private Vector3[] tomaObjInicio;
     private Vector3[] tomaObjFin;
 
-    /** Busca en tiempo real una posicion de camara real, libre de colision, cerca de un objetivo
-     * (pedido explicito del usuario 2026-08-12, ver seleccion de spawn de Freddy en show()) --
-     * nunca inventa coordenadas: prueba el mismo offset "(-X,+Z)" ya usado para los 4 personajes
-     * originales primero, y si esa direccion especifica esta bloqueada en la sala real donde le
-     * tocaba aparecer esta partida, prueba variantes de respaldo (otros 3 cuadrantes, luego
-     * directamente arriba del objetivo como ultimo recurso) hasta encontrar una real y verificada
-     * con CollisionWorld.overlapsStatic contra el mapa ya cargado. */
-    private Vector3 buscarPosicionCamaraSegura(float objetivoX, float objetivoZ, float altura) {
+    /** Busca en tiempo real una posicion de camara real, libre de colision Y CON LINEA DE VISION
+     * REALMENTE DESPEJADA hacia el objetivo (pedido explicito del usuario 2026-08-12, ver
+     * seleccion de spawn de Freddy en show()) -- nunca inventa coordenadas: prueba el mismo offset
+     * "(-X,+Z)" ya usado para los 4 personajes originales primero, y si esa direccion especifica
+     * esta bloqueada (o simplemente tapada) en la sala real donde le tocaba aparecer esta partida,
+     * prueba variantes de respaldo (otros 3 cuadrantes, luego directamente arriba del objetivo
+     * como ultimo recurso) hasta encontrar una real y verificada.
+     *
+     * CAUSA RAIZ REAL de "Freddy no aparece" (investigacion 2026-08-14): la version original de
+     * esta funcion solo llamaba a CollisionWorld.overlapsStatic() sobre la posicion de la CAMARA
+     * en si -- nunca comprobaba si el trayecto recto entre la camara y el objetivo pasaba a traves
+     * de mobiliario/paredes de por medio. Reproducido en vivo con captura real: con el candidato de
+     * spawn alternativo (0.0, 6.0), el primer offset probado ((-1,+2) => camara en (-1, 1.7, 8.0))
+     * no esta incrustado, pero un monitor CRT de la oficina (modelado como decoracion suelta, no
+     * como pared) queda exactamente en medio -- la toma de la cinematica inicial mostraba el
+     * monitor a pantalla completa, cero Freddy visible, en la MAYORIA de las partidas nuevas (3 de
+     * los 4 candidatos de spawn usan esta funcion; solo el candidato original usa el encuadre fijo
+     * ya verificado a mano). Corregido exigiendo tambien CollisionWorld.lineaDeVisionLibre() --
+     * mismo patron de escaneo real ya usado en el resto del proyecto, no una heuristica nueva. */
+    private Vector3 buscarPosicionCamaraSegura(float objetivoX, float objetivoZ, float altura, float objetivoAltura) {
         float[][] offsets = {
                 {-1f, 2f}, {1f, 2f}, {-1f, -2f}, {1f, -2f}, {0f, 1.5f}, {0f, -1.5f}, {0f, 0f},
         };
         Vector3 mitadCamara = new Vector3(0.25f, 0.25f, 0.25f);
+        Vector3 objetivo = new Vector3(objetivoX, objetivoAltura, objetivoZ);
         for (float[] offset : offsets) {
             Vector3 candidato = new Vector3(objetivoX + offset[0], altura, objetivoZ + offset[1]);
-            if (!collisionWorld.overlapsStatic(candidato, mitadCamara)) {
+            if (!collisionWorld.overlapsStatic(candidato, mitadCamara)
+                    && collisionWorld.lineaDeVisionLibre(candidato, objetivo)) {
                 return candidato;
             }
         }
@@ -1862,7 +1876,7 @@ public class GameplayScreen implements Screen {
         // en la sala donde le toco aparecer esta partida.
         Vector3 freddyPos;
         if (freddyStartElegidoX != mapDef.freddyStartX || freddyStartElegidoZ != mapDef.freddyStartZ) {
-            freddyPos = buscarPosicionCamaraSegura(freddyStartElegidoX, freddyStartElegidoZ, 1.7f);
+            freddyPos = buscarPosicionCamaraSegura(freddyStartElegidoX, freddyStartElegidoZ, 1.7f, alturaMirada);
         } else {
             freddyPos = new Vector3(6f, 1.7f, -2f);
         }

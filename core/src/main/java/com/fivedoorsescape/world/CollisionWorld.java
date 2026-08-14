@@ -111,6 +111,32 @@ public class CollisionWorld {
         return overlaps(center, halfExtents, false);
     }
 
+    /**
+     * True si el segmento recto entre "desde" y "hasta" no atraviesa ningun collider estatico --
+     * muestreado en pasos pequeños (mismo patron de escaneo real ya usado en todo el proyecto
+     * para verificar geometria, no una unica prueba de punto). Hallazgo real (investigacion
+     * "Freddy no aparece" 2026-08-14): una posicion de camara puede no estar "incrustada" segun
+     * overlapsStatic y aun asi tener el objetivo completamente tapado por mobiliario/paredes entre
+     * medio (p.ej. un monitor de la oficina justo en medio) -- exactamente el mismo tipo de hueco
+     * entre el CollisionWorld simplificado y la geometria visual real ya documentado antes en este
+     * proyecto. Usado por GameplayScreen.buscarPosicionCamaraSegura() para la camara de la
+     * cinematica inicial.
+     */
+    public boolean lineaDeVisionLibre(Vector3 desde, Vector3 hasta) {
+        float distancia = desde.dst(hasta);
+        int pasos = Math.max(1, (int) (distancia / 0.15f));
+        Vector3 punto = new Vector3();
+        Vector3 halfExtentsMuestra = new Vector3(0.05f, 0.05f, 0.05f);
+        for (int i = 1; i < pasos; i++) {
+            float t = (float) i / pasos;
+            punto.set(desde).lerp(hasta, t);
+            if (overlapsStatic(punto, halfExtentsMuestra)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Igual que overlapsStatic, mas los colliders solo-jugador (ver collidersSoloJugador) -- para
      * sondeos/diagnosticos que necesitan ver exactamente lo que el jugador (no un guardia) puede
      * pisar. */
