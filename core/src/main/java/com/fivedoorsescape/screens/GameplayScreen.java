@@ -2536,6 +2536,7 @@ public class GameplayScreen implements Screen {
         texturaCorazonLleno.dispose();
         texturaCorazonVacio.dispose();
         texturaSangre.dispose();
+        texturaGoldenFreddyJumpscare.dispose();
         for (Model modelo : modelosDecalSangre) {
             modelo.dispose();
         }
