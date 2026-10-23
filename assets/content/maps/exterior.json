@@ -1,0 +1,66 @@
+{
+    "id": "exterior",
+    "modelPath": "models/exterior_parking.glb",
+    "carModelPath": "models/car_sedan.glb",
+
+    "wallX": -12.61,
+    "wallInnerX": -11.897,
+    "wallPanelMinZ": -7.31,
+    "wallPanelMaxZ": -2.81,
+    "wallPanelTop": 2.96,
+    "shelfRemoveMinX": -12.65,
+    "shelfRemoveMaxX": -11.40,
+    "shelfRemoveMinZ": -6.35,
+    "shelfRemoveMaxZ": -3.70,
+
+    "emergencyDoorZ": -5.2,
+    "emergencyDoorWidth": 0.95,
+    "emergencyDoorHeight": 2.05,
+
+    "exitDoorNode": "Object_60",
+    "exitDoorHingeX": -8.87,
+    "exitDoorHingeZ": -5.87,
+    "exitDoorMinX": -9.30,
+    "exitDoorMaxX": -8.50,
+    "exitDoorMinZ": -6.82,
+    "exitDoorMaxZ": -5.78,
+
+    "lotMinX": -27.0,
+    "lotMinZ": -16.0,
+    "lotMaxZ": 1.0,
+    "northFaceX": -11.97,
+    "gateMinX": -23.4,
+    "gateMaxX": -18.6,
+    "roadZ": -19.5,
+
+    "carX": -20.0,
+    "carZ": -4.5,
+    "carYawDegrees": 180.0,
+    "carHalfWidth": 1.05,
+    "carHalfLength": 2.45,
+    "carDoorHingeLocal": [1.039, 0.921, 0.931],
+    "carDriverEyeLocal": [0.436, 1.15, -0.1],
+
+    "freddyDoorX": -12.05,
+    "freddyDoorZ": -5.2,
+
+    "lamps": [
+        { "x": -22.7, "z": -1.6, "yaw": 180.0, "height": 3.2, "intensity": 34.0, "flicker": false },
+        { "x": -15.6, "z": -11.6, "yaw": 90.0, "height": 3.2, "intensity": 26.0, "flicker": false },
+        { "x": -24.8, "z": -15.2, "yaw": 45.0, "height": 3.2, "intensity": 22.0, "flicker": true }
+    ],
+    "wallLamp": { "x": -12.92, "y": 2.55, "z": -5.95 },
+
+    "props": [
+        { "model": "covered_car", "x": -24.4, "z": -11.3, "yaw": 90.0, "collider": [0.95, 2.25] },
+        { "model": "metal_trash_can", "x": -13.25, "z": -7.25, "yaw": 90.0, "collider": [0.92, 0.3] },
+        { "model": "trashbag", "x": -13.3, "z": -6.15, "yaw": 20.0 },
+        { "model": "trashbag", "x": -13.75, "z": -6.45, "yaw": 140.0 },
+        { "model": "cardboard_box_01", "x": -13.2, "z": -3.25, "yaw": 15.0 },
+        { "model": "cardboard_box_01", "x": -13.25, "z": -3.75, "yaw": -30.0 },
+        { "model": "utility_box_01", "x": -12.95, "z": -1.25, "yaw": 90.0, "collider": [0.25, 0.3] },
+        { "model": "concrete_road_barrier_02", "x": -24.3, "z": -16.5, "yaw": 0.0, "collider": [0.8, 0.25] },
+        { "model": "concrete_road_barrier_02", "x": -17.7, "z": -16.5, "yaw": 0.0, "collider": [0.8, 0.25] },
+        { "model": "water_manhole_cover", "x": -16.4, "z": -9.4, "yaw": 0.0 }
+    ]
+}

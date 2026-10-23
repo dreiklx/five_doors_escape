@@ -31,6 +31,16 @@ public class ContentRegistry {
         return def;
     }
 
+    private ExteriorDefinition exteriorCache;
+
+    /** Exterior de la victoria (content/maps/exterior.json), ver ExteriorDefinition. */
+    public ExteriorDefinition getExteriorDefinition() {
+        if (exteriorCache == null) {
+            exteriorCache = json.fromJson(ExteriorDefinition.class, Gdx.files.internal(MAPS_DIR + "exterior.json"));
+        }
+        return exteriorCache;
+    }
+
     public MapDefinition getMapDefinition(String id) {
         MapDefinition cached = mapCache.get(id);
         if (cached != null) {

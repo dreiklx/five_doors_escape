@@ -333,6 +333,11 @@ public class LevelLoader {
         return false;
     }
 
+    private void agregarParedLimite(CollisionWorld collisionWorld, BoundingBox caja) {
+        paredesLimite.add(caja);
+        collisionWorld.addStaticCollider(caja);
+    }
+
     /**
      * Reemplaza el collider degenerado descartado arriba con 4 paredes limite delgadas, sinteticas
      * (no derivadas de ningun nodo del mapa), alineadas con la huella total del edificio. Hallazgo
@@ -342,6 +347,15 @@ public class LevelLoader {
      * parecen estar fusionadas en el mismo objeto que se filtra como "degenerado" arriba, asi que
      * esta es la unica fuente de colision perimetral que le queda al jugador y a Freddy.
      */
+    /** Las 4 paredes limite sinteticas en el orden en que se agregan (sur, norte, oeste, este). La victoria de Escape
+     * (SalidaExterior.activarExterior) retira la del oeste y recorta la del sur cuando el jugador sale al
+     * estacionamiento; mientras tanto siguen siendo el limite del mundo. */
+    private final Array<BoundingBox> paredesLimite = new Array<>();
+
+    public Array<BoundingBox> getParedesLimite() {
+        return paredesLimite;
+    }
+
     private void addBoundaryWalls(BoundingBox mapFootprint, CollisionWorld collisionWorld) {
         float minX = mapFootprint.min.x;
         float maxX = mapFootprint.max.x;
@@ -351,13 +365,13 @@ public class LevelLoader {
         float maxZ = mapFootprint.max.z;
         float t = BOUNDARY_WALL_THICKNESS;
 
-        collisionWorld.addStaticCollider(new BoundingBox(
+        agregarParedLimite(collisionWorld, new BoundingBox(
                 new Vector3(minX - t, minY, minZ - t), new Vector3(maxX + t, maxY, minZ)));
-        collisionWorld.addStaticCollider(new BoundingBox(
+        agregarParedLimite(collisionWorld, new BoundingBox(
                 new Vector3(minX - t, minY, maxZ), new Vector3(maxX + t, maxY, maxZ + t)));
-        collisionWorld.addStaticCollider(new BoundingBox(
+        agregarParedLimite(collisionWorld, new BoundingBox(
                 new Vector3(minX - t, minY, minZ - t), new Vector3(minX, maxY, maxZ + t)));
-        collisionWorld.addStaticCollider(new BoundingBox(
+        agregarParedLimite(collisionWorld, new BoundingBox(
                 new Vector3(maxX, minY, minZ - t), new Vector3(maxX + t, maxY, maxZ + t)));
     }
 

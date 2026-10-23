@@ -9,6 +9,8 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.content.ContentRegistry;
 import com.fivedoorsescape.content.EntityDefinition;
+import com.fivedoorsescape.cinematics.CinematicaVictoria;
+import com.fivedoorsescape.content.ExteriorDefinition;
 import com.fivedoorsescape.content.MapDefinition;
 import com.fivedoorsescape.io.HandoffData;
 import com.fivedoorsescape.io.HandoffReader;
@@ -65,6 +67,15 @@ public class BootScreen implements Screen {
         assets.queueSound(GameplayScreen.SONIDO_ROBOTVOICE);
         assets.queueSound(GameplayScreen.SONIDO_RESPIRACION_AGITADA);
         assets.queueSound(GameplayScreen.rutaAudioEscape(handoff.idioma));
+
+        // Victoria con salida fisica (CLAUDE.md §2.49): exterior, auto y sus sonidos se cargan con la partida para
+        // que abrir la puerta no provoque ninguna pausa de carga.
+        ExteriorDefinition exterior = registry.getExteriorDefinition();
+        assets.queueModel(exterior.modelPath);
+        assets.queueModel(exterior.carModelPath);
+        for (String sonido : CinematicaVictoria.SONIDOS) {
+            assets.queueSound(sonido);
+        }
     }
 
     @Override

@@ -35,6 +35,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 
 import com.fivedoorsescape.ai.states.IdleState;
+import com.fivedoorsescape.cinematics.CinematicaVictoria;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.camera.FirstPersonCameraController;
 import com.fivedoorsescape.content.ContentRegistry;
@@ -55,6 +56,7 @@ import com.fivedoorsescape.util.Lang;
 import com.fivedoorsescape.util.WavDuration;
 import com.fivedoorsescape.world.CollisionWorld;
 import com.fivedoorsescape.world.LevelLoader;
+import com.fivedoorsescape.world.SalidaExterior;
 
 import net.mgsx.gltf.scene3d.attributes.FogAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
@@ -292,7 +294,20 @@ public class GameplayScreen implements Screen {
     private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.5f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
-        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE }
+        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, VICTORIA_CINEMATICA }
+
+    // Victoria con salida fisica (CLAUDE.md §2.49): la llave abre la puerta de salida hacia el deposito, la barra de la
+    // puerta de emergencia abre el estacionamiento y la puerta del auto dispara CinematicaVictoria.
+    private SalidaExterior salidaExterior;
+    private CinematicaVictoria cinematicaVictoria;
+    private ObjetoInteractivo interactivoPuertaSalida;
+    private ObjetoInteractivo interactivoBarraEmergencia;
+    private ObjetoInteractivo interactivoAuto;
+    private Sound sonidoAmbienteNoche;
+    private long idAmbienteNoche = -1;
+    private float volumenAmbienteNoche = 0f;
+    private float volumenAmbienteNocheObjetivo = 0f;
+    private boolean freddyEnPuertaEmergencia = false;
 
     private boolean pausado = false;
     /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
@@ -458,6 +473,8 @@ public class GameplayScreen implements Screen {
         float distanciaMaxima;
         boolean activo = true;
         Runnable accion;
+        /** Texto de la ayuda en pantalla (clave de i18n). */
+        String claveTexto = "interact.prompt";
     }
 
     private static final float LLAVE_RADIO_INTERACCION = 0.4f;
@@ -563,12 +580,17 @@ public class GameplayScreen implements Screen {
         mapDef = registry.getMapDefinition("pizzeria");
         LevelLoader levelLoader = new LevelLoader(registry, assets);
         mapScene = levelLoader.loadMapScene("pizzeria");
+        // Antes de generar colisiones: abre el hueco de la puerta de emergencia en la pared oeste del deposito y retira
+        // el estante que la tapaba (pizzeria.glb no se toca en disco) -- ver SalidaExterior.prepararMapa.
+        salidaExterior = new SalidaExterior(registry.getExteriorDefinition(), assets);
+        salidaExterior.prepararMapa(mapScene);
 
         exitX = mapDef.exitX;
         exitZ = mapDef.exitZ;
         exitRadius = mapDef.exitRadius;
 
         levelLoader.buildStaticColliders(mapScene, collisionWorld, exitX, exitZ);
+        salidaExterior.agregarColisionadores(collisionWorld, levelLoader.getParedesLimite());
         Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
         collisionWorld.configurarEscalon(mapDef.stageMinX, mapDef.stageMaxX, mapDef.stageMinZ, mapDef.stageMaxZ,
                 mapDef.stageHeight);
@@ -668,6 +690,27 @@ public class GameplayScreen implements Screen {
         interactivoPuerta.distanciaMaxima = exitRadius + PUERTA_MARGEN_DISTANCIA_INTERACCION;
         interactivoPuerta.accion = this::interactuarConPuertaSalida;
         objetosInteractivos.add(interactivoPuerta);
+        interactivoPuertaSalida = interactivoPuerta;
+
+        // Barra antipanico de la puerta de emergencia y puerta del conductor: inactivas hasta que se abre la puerta
+        // anterior (CLAUDE.md §2.49).
+        com.fivedoorsescape.content.ExteriorDefinition ext = salidaExterior.getDefinicion();
+        interactivoBarraEmergencia = new ObjetoInteractivo();
+        interactivoBarraEmergencia.posicion.set(ext.wallX + 0.06f, 1.02f, ext.emergencyDoorZ);
+        interactivoBarraEmergencia.radio = 0.55f;
+        interactivoBarraEmergencia.distanciaMaxima = 1.9f;
+        interactivoBarraEmergencia.activo = false;
+        interactivoBarraEmergencia.claveTexto = "exit.push";
+        interactivoBarraEmergencia.accion = this::abrirPuertaEmergencia;
+        objetosInteractivos.add(interactivoBarraEmergencia);
+        interactivoAuto = new ObjetoInteractivo();
+        salidaExterior.puntoAuto(ext.carDoorHingeLocal[0] + 0.03f, 0.95f, 0.1f, interactivoAuto.posicion);
+        interactivoAuto.radio = 0.6f;
+        interactivoAuto.distanciaMaxima = 2.1f;
+        interactivoAuto.activo = false;
+        interactivoAuto.claveTexto = "car.enter";
+        interactivoAuto.accion = this::subirAlAuto;
+        objetosInteractivos.add(interactivoAuto);
 
         // Golden Freddy (pedido explicito del usuario 2026-08-10): sentado dentro del bano, al
         // final del pasillo -- entidad estatica SIN AIComponent (golden_freddy.json tiene
@@ -699,7 +742,8 @@ public class GameplayScreen implements Screen {
         // simplemente se compila sin soporte de luces spot).
         net.mgsx.gltf.scene3d.shaders.PBRShaderConfig pbrConfig = PBRShaderProvider.createDefaultConfig();
         pbrConfig.numBones = numBones;
-        pbrConfig.numSpotLights = 1;
+        // 1 linterna + 3 faroles del estacionamiento + 2 faros del auto (SalidaExterior).
+        pbrConfig.numSpotLights = 6;
         sceneManager = new SceneManager(PBRShaderProvider.createDefault(pbrConfig), PBRShaderProvider.createDefaultDepth(numBones));
         sceneManager.addScene(mapScene);
         for (Entity guardia : engine.getEntities()) {
@@ -708,6 +752,7 @@ public class GameplayScreen implements Screen {
             }
         }
         sceneManager.setCamera(camera);
+        salidaExterior.agregarAEscena(sceneManager, mapScene);
 
         // Sombras direccionales reales (nativas de gdx-gltf, DirectionalShadowLight extiende
         // DirectionalLightEx -- SceneManager.render() ya las detecta y renderiza automaticamente,
@@ -824,6 +869,7 @@ public class GameplayScreen implements Screen {
         sonidoXscream2 = assets.getSound(SONIDO_XSCREAM2);
         sonidoRobotvoice = assets.getSound(SONIDO_ROBOTVOICE);
         sonidoRespiracionAgitada = assets.getSound(SONIDO_RESPIRACION_AGITADA);
+        sonidoAmbienteNoche = assets.getSound(SalidaExterior.SONIDO_AMBIENTE_NOCHE);
         texturaGoldenFreddyJumpscare = new Texture(Gdx.files.internal("jumpscares/golden_freddy_jumpscare.png"));
         nodoCabezaGoldenFreddy = Mappers.model.get(entidadGoldenFreddy).scene.modelInstance.getNode("bip_head_028", true);
         if (nodoCabezaGoldenFreddy != null) {
@@ -1112,6 +1158,9 @@ public class GameplayScreen implements Screen {
             Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
             sonidoActivo.pause(idSonidoLatidoActivo);
         }
+        if (idAmbienteNoche != -1) {
+            sonidoAmbienteNoche.pause(idAmbienteNoche);
+        }
     }
 
     private void reanudarAudioContinuo() {
@@ -1121,6 +1170,9 @@ public class GameplayScreen implements Screen {
         if (idSonidoLatidoActivo != -1) {
             Sound sonidoActivo = estadoLatidoActual == EstadoLatido.RAPIDO ? sonidoLatidoRapido : sonidoLatidoNormal;
             sonidoActivo.resume(idSonidoLatidoActivo);
+        }
+        if (idAmbienteNoche != -1) {
+            sonidoAmbienteNoche.resume(idAmbienteNoche);
         }
     }
 
@@ -1255,10 +1307,8 @@ public class GameplayScreen implements Screen {
             return;
         }
         if (tieneLlave) {
-            escapado = true;
-            EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
-            game.setScreen(victoria);
-            dispose();
+            // Ya no termina aqui (CLAUDE.md §2.49): la puerta se abre de verdad y el jugador tiene que salir.
+            iniciarSalida();
         } else {
             sonidoForzandoPuerta.play();
             mensajeLlaveTextoClave = "key.need";
@@ -1295,6 +1345,128 @@ public class GameplayScreen implements Screen {
         }
         mensajeLlaveTextoClave = "key.lost";
         mensajeLlaveTiempoRestante = MENSAJE_LLAVE_DURACION;
+    }
+
+    // ------------------------------------------------------------------
+    // Victoria con salida fisica (CLAUDE.md §2.49).
+    // ------------------------------------------------------------------
+
+    /** Con la llave: la puerta de salida gira hacia el deposito. Desde aqui los animatronicos dejan de cazar -- la
+     * victoria y una atrapada nunca pueden solaparse -- y la tension la llevan el sonido y Freddy, que reaparece
+     * en la puerta de emergencia cuando el jugador ya esta afuera. */
+    private void iniciarSalida() {
+        if (salidaExterior.puertaSalidaAbierta()) {
+            return;
+        }
+        salidaExterior.abrirPuertaSalida();
+        assets.getSound(SalidaExterior.SONIDO_PUERTA_SALIDA).play(1f);
+        interactivoPuertaSalida.activo = false;
+        interactivoBarraEmergencia.activo = true;
+        interactivoGoldenFreddy.activo = false;
+        congelarAnimatronicos();
+    }
+
+    private void congelarAnimatronicos() {
+        AISystem ai = engine.getSystem(AISystem.class);
+        if (ai != null) {
+            engine.removeSystem(ai);
+        }
+        for (AIComponent guardia : guardias) {
+            guardia.jugadorAtrapado = false;
+            Entity entidad = entidadDeGuardia(guardia);
+            AnimationComponent animacion = Mappers.animation.get(entidad);
+            if (animacion != null) {
+                animacion.nombreLogicoActual = "idle";
+            }
+        }
+    }
+
+    /** La barra de la puerta de emergencia: el estacionamiento aparece y el mundo pasa a "exterior". */
+    private void abrirPuertaEmergencia() {
+        if (salidaExterior.puertaEmergenciaAbierta()) {
+            return;
+        }
+        salidaExterior.abrirPuertaEmergencia();
+        salidaExterior.activarExterior(sceneManager, luzDireccional);
+        assets.getSound(SalidaExterior.SONIDO_PUERTA_EMERGENCIA).play(1f);
+        interactivoBarraEmergencia.activo = false;
+        interactivoAuto.activo = true;
+        if (idAmbienteNoche == -1) {
+            idAmbienteNoche = sonidoAmbienteNoche.loop(0f);
+        }
+        volumenAmbienteNocheObjetivo = 0.85f;
+    }
+
+    /** Puerta del conductor: empieza la cinematica de victoria. */
+    private void subirAlAuto() {
+        if (estado != EstadoPartida.JUGANDO || cinematicaVictoria != null) {
+            return;
+        }
+        interactivoAuto.activo = false;
+        detenerLatidos();
+        linternaEncendida = false;
+        linternaJugador.intensity = 0f;
+        cinematicaVictoria = new CinematicaVictoria(camera, salidaExterior, assets, v -> volumenAmbienteNocheObjetivo = v,
+                this::colocarFreddyEnPuertaEmergencia, Lang.get(handoff.idioma, "cinematic.skip"));
+        cinematicaVictoria.iniciar();
+        estado = EstadoPartida.VICTORIA_CINEMATICA;
+        tiempoEnEstado = 0f;
+    }
+
+    /** Freddy queda de pie en la puerta de emergencia, mirando hacia el estacionamiento. */
+    private void colocarFreddyEnPuertaEmergencia() {
+        if (freddyEnPuertaEmergencia || freddyEntity == null) {
+            return;
+        }
+        freddyEnPuertaEmergencia = true;
+        TransformComponent t = Mappers.transform.get(freddyEntity);
+        t.position.set(salidaExterior.getDefinicion().freddyDoorX, 0f, salidaExterior.getDefinicion().freddyDoorZ);
+        t.yawDegrees = -90f;
+    }
+
+    /** Ya afuera, a unos metros de la puerta y mirando hacia otro lado: Freddy aparece en el umbral (su caja musical,
+     * que suena desde el, delata que esta ahi). Nunca aparece a la vista del jugador. */
+    private void actualizarFreddyEnPuerta(Vector3 posicionJugador) {
+        if (freddyEnPuertaEmergencia || !salidaExterior.isExteriorActivo()) {
+            return;
+        }
+        com.fivedoorsescape.content.ExteriorDefinition ext = salidaExterior.getDefinicion();
+        if (posicionJugador.x > ext.wallX - 3.0f) {
+            return;
+        }
+        tmpInterseccion.set(ext.freddyDoorX, 1.5f, ext.freddyDoorZ).sub(camera.position).nor();
+        if (tmpInterseccion.dot(camera.direction) < 0.2f) {
+            colocarFreddyEnPuertaEmergencia();
+        }
+    }
+
+    private void actualizarAmbienteNoche(float dt) {
+        if (idAmbienteNoche == -1) {
+            return;
+        }
+        volumenAmbienteNoche += (volumenAmbienteNocheObjetivo - volumenAmbienteNoche) * Math.min(1f, dt * 1.6f);
+        sonidoAmbienteNoche.setVolume(idAmbienteNoche, volumenAmbienteNoche);
+    }
+
+    private void actualizarCinematicaVictoria(float dt) {
+        boolean termino = cinematicaVictoria.actualizar(dt);
+        if (termino) {
+            // Unico registro de la victoria: escapado bloquea cualquier otro final a partir de aqui.
+            escapado = true;
+            cinematicaVictoria.terminar();
+            EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
+            game.setScreen(victoria);
+            dispose();
+            return;
+        }
+        salidaExterior.actualizar(dt);
+        actualizarAmbienteNoche(dt);
+        engine.update(dt);
+        actualizarMusicaEspacialFreddy();
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(dt);
+        sceneManager.render();
+        cinematicaVictoria.dibujarOverlay(uiBatch, uiShapes, uiFont);
     }
 
     // ------------------------------------------------------------------
@@ -1620,7 +1792,7 @@ public class GameplayScreen implements Screen {
         if (objetivoInteractivoActual == null) {
             return;
         }
-        String texto = Lang.get(handoff.idioma, "interact.prompt");
+        String texto = Lang.get(handoff.idioma, objetivoInteractivoActual.claveTexto);
         float escalaOriginal = uiFont.getScaleX();
         uiFont.getData().setScale(ESCALA_TEXTO_INTERACCION);
         GlyphLayout layout = new GlyphLayout(uiFont, texto);
@@ -1714,6 +1886,9 @@ public class GameplayScreen implements Screen {
             case GOLDEN_FREDDY_JUMPSCARE:
                 actualizarGoldenFreddyJumpscare(dt);
                 return;
+            case VICTORIA_CINEMATICA:
+                actualizarCinematicaVictoria(dt);
+                return;
             default:
                 break;
         }
@@ -1778,6 +1953,9 @@ public class GameplayScreen implements Screen {
         linternaJugador.intensity = linternaEncendida ? LINTERNA_INTENSIDAD_ENCENDIDA : 0f;
 
         engine.update(dt);
+        salidaExterior.actualizar(dt);
+        actualizarFreddyEnPuerta(playerTransform.position);
+        actualizarAmbienteNoche(dt);
 
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
         sceneManager.update(dt);
@@ -1814,6 +1992,13 @@ public class GameplayScreen implements Screen {
         // frame -- sin este chequeo, dibujarCrosshair()/etc. seguirian dibujando la escena normal
         // encima del primer frame del jumpscare especial.
         if (escapado || estado != EstadoPartida.JUGANDO) {
+            return;
+        }
+        if (salidaExterior.puertaSalidaAbierta()) {
+            // Desde que se abre la salida nadie caza (congelarAnimatronicos): solo HUD, sin chequeo de atrapadas.
+            dibujarCrosshair();
+            dibujarTextoInteraccion();
+            dibujarMensajeLlave(dt);
             return;
         }
         dibujarCrosshair();
@@ -2546,6 +2731,14 @@ public class GameplayScreen implements Screen {
             idSonidoMusicaFreddy = -1;
         }
         texturaVineta.dispose();
+        if (cinematicaVictoria != null) {
+            cinematicaVictoria.terminar();
+        }
+        if (idAmbienteNoche != -1) {
+            sonidoAmbienteNoche.stop(idAmbienteNoche);
+            idAmbienteNoche = -1;
+        }
+        salidaExterior.dispose();
         assets.dispose();
     }
 }

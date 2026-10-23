@@ -80,6 +80,12 @@ public class CollisionWorld {
         collidersSoloJugador.add(box);
     }
 
+    /** Lista viva de colliders estaticos (solo lectura): SalidaExterior la recorre para retirar los de la hoja de la
+     * puerta de salida al abrirla. */
+    public Array<BoundingBox> getStaticColliders() {
+        return staticColliders;
+    }
+
     public int getStaticColliderCount() {
         return staticColliders.size;
     }
