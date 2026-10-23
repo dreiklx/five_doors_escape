@@ -1,6 +1,6 @@
 {
     "id": "chica",
-    "modelPath": "models/Chica.glb",
+    "modelPath": "models/chica.glb",
     "scale": 0.02289,
     "rotationXDegrees": 0.0,
     "animaciones": {

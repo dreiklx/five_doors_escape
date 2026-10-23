@@ -1,6 +1,6 @@
 {
     "id": "pizzeria",
-    "modelPath": "models/Pizzeria.glb",
+    "modelPath": "models/pizzeria.glb",
     "scale": 1.0,
     "rotationXDegrees": 0.0,
     "playerStartX": 0.0,

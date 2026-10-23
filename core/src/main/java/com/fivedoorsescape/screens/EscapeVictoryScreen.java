@@ -58,7 +58,7 @@ public class EscapeVictoryScreen implements Screen {
         // Cargado directo (no via AssetService/BootScreen): esta pantalla solo se alcanza una
         // vez, al final de una partida ganada -- no vale la pena precargarlo desde el arranque
         // para un uso que puede no llegar a ocurrir nunca en una sesion dada.
-        sonidoVictoria = Gdx.audio.newSound(Gdx.files.internal("sounds/circus.wav"));
+        sonidoVictoria = Gdx.audio.newSound(Gdx.files.internal("audio/music/victory_circus.wav"));
         idSonidoVictoria = sonidoVictoria.loop();
     }
 

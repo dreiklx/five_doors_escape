@@ -1,6 +1,6 @@
 {
     "id": "freddy",
-    "modelPath": "models/Freddy.glb",
+    "modelPath": "models/freddy.glb",
     "scale": 10.0,
     "rotationXDegrees": 0.0,
     "animaciones": {

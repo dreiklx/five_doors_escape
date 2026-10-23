@@ -122,41 +122,41 @@ public class GameplayScreen implements Screen {
      * usuario 2026-08-03: reutilizar el jumpscare/estatica genericos ya existentes (ni Swing tiene
      * uno distinto por personaje) en vez de importar assets 2D del proyecto Swing. Publicas para
      * que BootScreen las encole junto con los modelos, sin nombres de archivo duplicados. */
-    public static final String SONIDO_JUMPSCARE = "sounds/jumpscare.wav";
-    public static final String SONIDO_ESTATICA = "sounds/static.wav";
+    public static final String SONIDO_JUMPSCARE = "audio/sfx/jumpscare_scream.wav";
+    public static final String SONIDO_ESTATICA = "audio/sfx/static.wav";
     /** Risa de Freddy reutilizada de FiveDoorsAtFreddys (risa_freddy1.wav), reproducida una sola
      * vez al aparecer "RUN" en la intro -- pedido explicito del usuario. */
-    public static final String SONIDO_RISA_FREDDY = "sounds/risa_freddy.wav";
+    public static final String SONIDO_RISA_FREDDY = "audio/sfx/freddy_laugh.wav";
     /** Latidos de tension (pedido explicito del usuario 2026-08-04): dos clips en loop, uno normal
      * y uno acelerado, elegidos segun la distancia real al animatronico mas cercano. Ver
      * actualizarLatidosYVineta. */
-    public static final String SONIDO_LATIDO_NORMAL = "sounds/latido_normal.wav";
-    public static final String SONIDO_LATIDO_RAPIDO = "sounds/latido_rapido.wav";
+    public static final String SONIDO_LATIDO_NORMAL = "audio/sfx/heartbeat_normal.wav";
+    public static final String SONIDO_LATIDO_RAPIDO = "audio/sfx/heartbeat_fast.wav";
     /** Click de la linterna al encender/apagar (pedido explicito del usuario 2026-08-05, CTRL
      * como tecla de alternancia). Reutiliza botones_menu.wav de FiveDoorsAtFreddys (mismo patron
      * de reuso de assets ya establecido para risa_freddy/jumpscare/estatica) -- un clic corto
      * generico encaja igual de bien como sonido de interruptor de linterna. */
-    public static final String SONIDO_LINTERNA_CLICK = "sounds/linterna_click.wav";
+    public static final String SONIDO_LINTERNA_CLICK = "audio/sfx/flashlight_click.wav";
     /** Musica espacial de Freddy (pedido explicito del usuario 2026-08-06: "Freddy sea una
      * especie de caja musical... que esa musica salga UNICAMENTE desde Freddy... audio
      * espacial"). Ver actualizarMusicaEspacialFreddy(). */
-    public static final String SONIDO_MUSICA_FREDDY = "sounds/musica_escape_freddy.wav";
+    public static final String SONIDO_MUSICA_FREDDY = "audio/music/freddy_music_box.wav";
     /** Reutilizado de FDAF assets (pedido explicito del usuario 2026-08-10): se reproduce cuando
      * el jugador interactua con la puerta de salida SIN tener la llave -- ver
      * actualizarInteraccion()/objetosInteractivos. */
-    public static final String SONIDO_FORZANDO_PUERTA = "sounds/forzando_puerta.wav";
+    public static final String SONIDO_FORZANDO_PUERTA = "audio/sfx/door_locked_rattle.wav";
     /** Reutilizado de FDAF assets (pedido explicito del usuario, misma sesion 2026-08-10): se
      * reproduce EXACTAMENTE al recoger la llave de verdad (dentro de recogerLlave(), no al solo
      * mirarla) -- mismo patron ya establecido para el resto de sonidos de esta pantalla. */
-    public static final String SONIDO_AGARRANDO_OBJETO = "sounds/agarrando_objeto.wav";
+    public static final String SONIDO_AGARRANDO_OBJETO = "audio/sfx/item_pickup.wav";
 
     /** Narracion de la cinematica inicial del modo Escape, en los 2 idiomas soportados (pedido
      * explicito del usuario 2026-08-05, mismos audios "Escape ES/EN" que el proyecto Swing usa
      * para la llamada de la Noche 5). Solo se encola/carga el archivo del idioma real de
      * handoff.idioma (ver rutaAudioEscape) -- nunca ambos, para no cargar audio que no se va a
      * usar en esta sesion. */
-    public static final String SONIDO_ESCAPE_ES = "sounds/escape_es.wav";
-    public static final String SONIDO_ESCAPE_EN = "sounds/escape_en.wav";
+    public static final String SONIDO_ESCAPE_ES = "audio/voice/escape_intro_narration_es.wav";
+    public static final String SONIDO_ESCAPE_EN = "audio/voice/escape_intro_narration_en.wav";
 
     /** Golden Freddy (pedido explicito del usuario 2026-08-10) -- reutilizado de FDAF assets, con
      * cuidado de usar los archivos correctos: GlitchGrave.wav (raiz de FDAF assets, distinto de
@@ -164,15 +164,15 @@ public class GameplayScreen implements Screen {
      * robotvoice.wav ya presente en FDAF assets/FDAF Sounds. Los 3 se cargan UNA vez en show()
      * (mismo patron que el resto de sonidos de esta pantalla) y se reutilizan via play()/loop()
      * -- nunca se crea un nuevo Sound por frame ni por entrada al rango. */
-    public static final String SONIDO_GLITCH_GRAVE = "sounds/glitch_grave.wav";
-    public static final String SONIDO_XSCREAM2 = "sounds/xscream2.wav";
-    public static final String SONIDO_ROBOTVOICE = "sounds/robotvoice.wav";
+    public static final String SONIDO_GLITCH_GRAVE = "audio/sfx/golden_freddy_glitch.wav";
+    public static final String SONIDO_XSCREAM2 = "audio/sfx/golden_freddy_scream.wav";
+    public static final String SONIDO_ROBOTVOICE = "audio/sfx/golden_freddy_robot_voice.wav";
     /** Respiracion agitada -- reutilizada del proyecto Swing (mismo archivo real que usa
      * ControllerInterfaz.respiracion, "varios/respiracion_agitada.wav"), copiada a este proyecto
      * porque Escape nunca tuvo su propio sonido de respiracion hasta ahora (pedido explicito del
      * usuario: "reproduce el sonido de respiración agitada ya existente en Escape" -- referencia
      * conceptual al mismo recurso del juego, no un archivo que ya viviera aqui). */
-    public static final String SONIDO_RESPIRACION_AGITADA = "sounds/respiracion_agitada.wav";
+    public static final String SONIDO_RESPIRACION_AGITADA = "audio/sfx/heavy_breathing.wav";
 
     /** Unico punto de resolucion idioma->archivo para la narracion de Escape -- BootScreen (al
      * encolar) y GameplayScreen.show() (al reproducir) llaman a este mismo metodo, para que la
@@ -185,11 +185,11 @@ public class GameplayScreen implements Screen {
      * un recurso exclusivo de un personaje -- aprobado explicitamente por el usuario). Se
      * decodifica con GifDecoder (javax.imageio, sin dependencias nuevas), no con una libreria de
      * GIF animado que libGDX no trae de forma nativa. */
-    private static final String GIF_ESTATICA = "gifs/Static.gif";
+    private static final String GIF_ESTATICA = "effects/static.gif";
     /** GIF real "IT'S ME" de FDAF assets (pedido explicito del usuario 2026-08-11, reemplaza el
      * texto disperso generado por procedimiento que se habia usado antes para la fase ITSME de
      * Golden Freddy -- mismo patron de reutilizacion ya aprobado que Static.gif). */
-    private static final String GIF_ITSME = "gifs/ItsMe.gif";
+    private static final String GIF_ITSME = "effects/golden_freddy_its_me.gif";
 
     /** Duracion de cada tramo de la secuencia de atrapada y de la intro (mecanica de 2 vidas). */
     private static final float DURACION_JUMPSCARE = 1f;
@@ -808,8 +808,8 @@ public class GameplayScreen implements Screen {
         uiFont.setColor(Color.WHITE);
         uiShapes = new ShapeRenderer();
 
-        texturaCorazonLleno = new Texture(Gdx.files.internal("textures/corazon_relleno.png"));
-        texturaCorazonVacio = new Texture(Gdx.files.internal("textures/corazon_vacio.png"));
+        texturaCorazonLleno = new Texture(Gdx.files.internal("ui/heart_full.png"));
+        texturaCorazonVacio = new Texture(Gdx.files.internal("ui/heart_empty.png"));
 
         sonidoJumpscare = assets.getSound(SONIDO_JUMPSCARE);
         sonidoEstatica = assets.getSound(SONIDO_ESTATICA);
@@ -824,7 +824,7 @@ public class GameplayScreen implements Screen {
         sonidoXscream2 = assets.getSound(SONIDO_XSCREAM2);
         sonidoRobotvoice = assets.getSound(SONIDO_ROBOTVOICE);
         sonidoRespiracionAgitada = assets.getSound(SONIDO_RESPIRACION_AGITADA);
-        texturaGoldenFreddyJumpscare = new Texture(Gdx.files.internal("textures/golden_freddy_jumpscare.png"));
+        texturaGoldenFreddyJumpscare = new Texture(Gdx.files.internal("jumpscares/golden_freddy_jumpscare.png"));
         nodoCabezaGoldenFreddy = Mappers.model.get(entidadGoldenFreddy).scene.modelInstance.getNode("bip_head_028", true);
         if (nodoCabezaGoldenFreddy != null) {
             rotacionBaseCabezaGoldenFreddy.set(nodoCabezaGoldenFreddy.rotation);

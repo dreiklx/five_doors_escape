@@ -1,6 +1,6 @@
 {
     "id": "foxy",
-    "modelPath": "models/Foxy.glb",
+    "modelPath": "models/foxy.glb",
     "scale": 0.095,
     "rotationXDegrees": 0.0,
     "animaciones": {
