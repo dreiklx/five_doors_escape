@@ -76,6 +76,9 @@ public class BootScreen implements Screen {
         for (String sonido : CinematicaVictoria.SONIDOS) {
             assets.queueSound(sonido);
         }
+        for (String sonido : com.fivedoorsescape.cinematics.CinematicaDerrota.SONIDOS) {
+            assets.queueSound(sonido);
+        }
     }
 
     @Override

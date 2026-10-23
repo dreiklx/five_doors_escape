@@ -79,4 +79,17 @@ public class MapDefinition {
     public float goldenFreddyY = 0f;
     public float goldenFreddyZ = 0f;
     public float goldenFreddyYawDegrees = 0f;
+
+    /** Derrota definitiva (CLAUDE.md §2.50): pasillo libre del comedor por el que el animatronico arrastra al jugador
+     * (verificado con un mapa de colision real: carril entre mesas en x=-1.9, z de 1.2 a -6.6), dos testigos en el
+     * pasillo transversal z=-2.7 y el punto del escenario donde termina. */
+    public float defeatLaneX = -1.9f;
+    public float defeatLaneStartZ = 0.8f;
+    public float defeatLaneEndZ = -5.9f;
+    public float defeatWitnessAX = -3.4f;
+    public float defeatWitnessAZ = -2.7f;
+    public float defeatWitnessBX = -0.4f;
+    public float defeatWitnessBZ = -2.7f;
+    public float defeatStageX = 0f;
+    public float defeatStageZ = -8.1f;
 }

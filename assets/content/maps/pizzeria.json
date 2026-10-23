@@ -36,5 +36,14 @@
     "goldenFreddyX": 10.6,
     "goldenFreddyY": -0.5,
     "goldenFreddyZ": 0.68,
-    "goldenFreddyYawDegrees": 180.0
+    "goldenFreddyYawDegrees": 180.0,
+    "defeatLaneX": -1.9,
+    "defeatLaneStartZ": 0.8,
+    "defeatLaneEndZ": -5.9,
+    "defeatWitnessAX": -3.4,
+    "defeatWitnessAZ": -2.7,
+    "defeatWitnessBX": -0.4,
+    "defeatWitnessBZ": -2.7,
+    "defeatStageX": 0.0,
+    "defeatStageZ": -8.1
 }

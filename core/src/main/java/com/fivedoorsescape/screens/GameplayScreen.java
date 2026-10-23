@@ -35,6 +35,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 
 import com.fivedoorsescape.ai.states.IdleState;
+import com.fivedoorsescape.cinematics.CinematicaDerrota;
 import com.fivedoorsescape.cinematics.CinematicaVictoria;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.camera.FirstPersonCameraController;
@@ -294,12 +295,14 @@ public class GameplayScreen implements Screen {
     private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.5f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
-        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, VICTORIA_CINEMATICA }
+        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, VICTORIA_CINEMATICA, DERROTA_CINEMATICA }
 
     // Victoria con salida fisica (CLAUDE.md §2.49): la llave abre la puerta de salida hacia el deposito, la barra de la
     // puerta de emergencia abre el estacionamiento y la puerta del auto dispara CinematicaVictoria.
     private SalidaExterior salidaExterior;
     private CinematicaVictoria cinematicaVictoria;
+    /** Derrota definitiva (CLAUDE.md §2.50): solo al perder la ultima vida, en lugar de la estatica. */
+    private CinematicaDerrota cinematicaDerrota;
     private ObjetoInteractivo interactivoPuertaSalida;
     private ObjetoInteractivo interactivoBarraEmergencia;
     private ObjetoInteractivo interactivoAuto;
@@ -742,8 +745,9 @@ public class GameplayScreen implements Screen {
         // simplemente se compila sin soporte de luces spot).
         net.mgsx.gltf.scene3d.shaders.PBRShaderConfig pbrConfig = PBRShaderProvider.createDefaultConfig();
         pbrConfig.numBones = numBones;
-        // 1 linterna + 3 faroles del estacionamiento + 2 faros del auto (SalidaExterior).
-        pbrConfig.numSpotLights = 6;
+        // 1 linterna + 3 faroles del estacionamiento + 2 faros del auto (SalidaExterior) + el foco del escenario de la
+        // derrota definitiva (CinematicaDerrota).
+        pbrConfig.numSpotLights = 7;
         sceneManager = new SceneManager(PBRShaderProvider.createDefault(pbrConfig), PBRShaderProvider.createDefaultDepth(numBones));
         sceneManager.addScene(mapScene);
         for (Entity guardia : engine.getEntities()) {
@@ -1889,6 +1893,9 @@ public class GameplayScreen implements Screen {
             case VICTORIA_CINEMATICA:
                 actualizarCinematicaVictoria(dt);
                 return;
+            case DERROTA_CINEMATICA:
+                actualizarCinematicaDerrota(dt);
+                return;
             default:
                 break;
         }
@@ -2401,8 +2408,55 @@ public class GameplayScreen implements Screen {
             // dejar que termine solo, para que nunca se solape con el de estatica que arranca a
             // continuacion (pedido explicito del usuario).
             sonidoJumpscare.stop(idSonidoJumpscareActivo);
-            iniciarEstatica();
+            if (vidasRestantes <= 1) {
+                // ultima vida: la estatica se reemplaza por la cinematica de derrota definitiva (CLAUDE.md §2.50)
+                iniciarCinematicaDerrota();
+            } else {
+                iniciarEstatica();
+            }
         }
+    }
+
+    private void iniciarCinematicaDerrota() {
+        AISystem ai = engine.getSystem(AISystem.class);
+        if (ai != null) {
+            engine.removeSystem(ai);
+        }
+        detenerLatidos();
+        Entity culpable = entidadDeGuardia(guardiaQueAtrapo);
+        Array<Entity> otros = new Array<>();
+        for (AIComponent guardia : guardias) {
+            guardia.jugadorAtrapado = false;
+            if (guardia != guardiaQueAtrapo) {
+                otros.add(entidadDeGuardia(guardia));
+            }
+        }
+        cinematicaDerrota = new CinematicaDerrota(camera, mapDef, culpable, otros, sceneManager, linternaJugador, assets,
+                () -> {
+                    if (idSonidoMusicaFreddy != -1) {
+                        sonidoMusicaFreddy.stop(idSonidoMusicaFreddy);
+                        idSonidoMusicaFreddy = -1;
+                    }
+                }, Lang.get(handoff.idioma, "cinematic.skip"));
+        cinematicaDerrota.iniciar();
+        estado = EstadoPartida.DERROTA_CINEMATICA;
+        tiempoEnEstado = 0f;
+    }
+
+    private void actualizarCinematicaDerrota(float dt) {
+        if (cinematicaDerrota.actualizar(dt)) {
+            cinematicaDerrota.terminar();
+            // el mismo cierre de siempre: pierde la llave, se descuenta la vida y NightGameOverScreen
+            resolverFinDeAtrapada();
+            return;
+        }
+        engine.update(dt);
+        actualizarMusicaEspacialFreddy();
+        Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(dt);
+        sceneManager.render();
+        cinematicaDerrota.dibujarOverlay(uiBatch, uiShapes, uiFont);
     }
 
     private void iniciarEstatica() {
@@ -2733,6 +2787,9 @@ public class GameplayScreen implements Screen {
         texturaVineta.dispose();
         if (cinematicaVictoria != null) {
             cinematicaVictoria.terminar();
+        }
+        if (cinematicaDerrota != null) {
+            cinematicaDerrota.terminar();
         }
         if (idAmbienteNoche != -1) {
             sonidoAmbienteNoche.stop(idAmbienteNoche);
