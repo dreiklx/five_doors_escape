@@ -37,6 +37,7 @@ import com.badlogic.gdx.utils.Array;
 import com.fivedoorsescape.ai.states.IdleState;
 import com.fivedoorsescape.cinematics.CinematicaDerrota;
 import com.fivedoorsescape.cinematics.CinematicaVictoria;
+import com.fivedoorsescape.cinematics.OmitirCinematica;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.camera.FirstPersonCameraController;
 import com.fivedoorsescape.content.ContentRegistry;
@@ -58,6 +59,11 @@ import com.fivedoorsescape.util.WavDuration;
 import com.fivedoorsescape.world.CollisionWorld;
 import com.fivedoorsescape.world.LevelLoader;
 import com.fivedoorsescape.world.SalidaExterior;
+import com.fivedoorsescape.world.AturdimientoLinterna;
+import com.fivedoorsescape.world.CullingEstatico;
+import com.fivedoorsescape.world.CortinaPirateCove;
+import com.fivedoorsescape.world.PuertasInteriores;
+import com.fivedoorsescape.ai.states.ChaseState;
 
 import net.mgsx.gltf.scene3d.attributes.FogAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
@@ -105,7 +111,7 @@ public class GameplayScreen implements Screen {
     // respawnJugador()) -- mismo timer, solo se reinicia a 0.
     private static final float AYUDA_ANCHO = 320f;
     // 118 -> 144: una linea mas para "E: Interactuar" (pedido explicito del usuario 2026-08-10).
-    private static final float AYUDA_ALTO = 144f;
+    private static final float AYUDA_ALTO = 170f;
     private static final float AYUDA_MARGEN = 16f;
     // 9 -> 10: pedido explicito del usuario 2026-08-10 ("permanece visible aproximadamente 10
     // segundos"), incluye el propio desvanecimiento (AYUDA_DURACION_FUNDIDO) en ese total, igual
@@ -176,6 +182,11 @@ public class GameplayScreen implements Screen {
      * usuario: "reproduce el sonido de respiración agitada ya existente en Escape" -- referencia
      * conceptual al mismo recurso del juego, no un archivo que ya viviera aqui). */
     public static final String SONIDO_RESPIRACION_AGITADA = "audio/sfx/heavy_breathing.wav";
+    /** Puertas interiores, puerta de seguridad y aturdimiento (CLAUDE.md §2.56, §2.58), sintetizados en tools/audio. */
+    public static final String SONIDO_PUERTA_INTERIOR_ABRE = "audio/sfx/interior_door_open.wav";
+    public static final String SONIDO_PUERTA_INTERIOR_CIERRA = "audio/sfx/interior_door_close.wav";
+    public static final String SONIDO_PUERTA_SEGURIDAD = "audio/sfx/security_door_slide.wav";
+    public static final String SONIDO_ATURDIMIENTO = "audio/sfx/animatronic_stun.wav";
 
     /** Unico punto de resolucion idioma->archivo para la narracion de Escape -- BootScreen (al
      * encolar) y GameplayScreen.show() (al reproducir) llaman a este mismo metodo, para que la
@@ -295,7 +306,11 @@ public class GameplayScreen implements Screen {
     private static final float GOLDEN_FREDDY_VOLUMEN_ROBOTVOICE = 1.5f;
 
     private enum EstadoPartida { CINEMATICA_INICIAL, INTRO_CORAZONES, INTRO_RUN, JUGANDO, JUMPSCARE, ESTATICA,
-        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, VICTORIA_CINEMATICA, DERROTA_CINEMATICA }
+        CORAZONES_RESPAWN, GOLDEN_FREDDY_JUMPSCARE, VICTORIA_CINEMATICA, DERROTA_CINEMATICA, INSTRUCCIONES }
+
+    /** Omision de la introduccion manteniendo ESC (CLAUDE.md §2.51) y id del audio de la narracion, para cortarlo. */
+    private OmitirCinematica omisionIntro;
+    private long idSonidoEscape = -1;
 
     // Victoria con salida fisica (CLAUDE.md §2.49): la llave abre la puerta de salida hacia el deposito, la barra de la
     // puerta de emergencia abre el estacionamiento y la puerta del auto dispara CinematicaVictoria.
@@ -311,6 +326,17 @@ public class GameplayScreen implements Screen {
     private float volumenAmbienteNoche = 0f;
     private float volumenAmbienteNocheObjetivo = 0f;
     private boolean freddyEnPuertaEmergencia = false;
+
+    // Mundo interactivo (CLAUDE.md §2.56-§2.58).
+    private PuertasInteriores puertasInteriores;
+    /** Frustum culling de lo estatico (CLAUDE.md §2.60): grupo 0 mapa, 1 exterior, 2 auto (sin frustum). */
+    private final CullingEstatico culling = new CullingEstatico();
+    private CortinaPirateCove cortinaPirateCove;
+    private AturdimientoLinterna aturdimientoLinterna;
+    private final Array<Entity> entidadesGuardias = new Array<>();
+    private final Array<Vector3> posicionesQueAbrenPuertas = new Array<>();
+    private PointLightEx chispaAturdimiento;
+    private float chispaRestante = 0f;
 
     private boolean pausado = false;
     /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
@@ -587,6 +613,7 @@ public class GameplayScreen implements Screen {
         // el estante que la tapaba (pizzeria.glb no se toca en disco) -- ver SalidaExterior.prepararMapa.
         salidaExterior = new SalidaExterior(registry.getExteriorDefinition(), assets);
         salidaExterior.prepararMapa(mapScene);
+        cortinaPirateCove = new CortinaPirateCove(mapScene, mapDef.curtainNode);
 
         exitX = mapDef.exitX;
         exitZ = mapDef.exitZ;
@@ -594,6 +621,9 @@ public class GameplayScreen implements Screen {
 
         levelLoader.buildStaticColliders(mapScene, collisionWorld, exitX, exitZ);
         salidaExterior.agregarColisionadores(collisionWorld, levelLoader.getParedesLimite());
+        puertasInteriores = new PuertasInteriores(mapScene, collisionWorld, mapDef.hingedDoors, mapDef.slidingDoors,
+                assets.getSound(SONIDO_PUERTA_INTERIOR_ABRE), assets.getSound(SONIDO_PUERTA_INTERIOR_CIERRA),
+                assets.getSound(SONIDO_PUERTA_SEGURIDAD));
         Gdx.app.log("GameplayScreen", "Colisionadores estaticos generados: " + collisionWorld.getStaticColliderCount());
         collisionWorld.configurarEscalon(mapDef.stageMinX, mapDef.stageMaxX, mapDef.stageMinZ, mapDef.stageMaxZ,
                 mapDef.stageHeight);
@@ -743,12 +773,32 @@ public class GameplayScreen implements Screen {
         // por defecto (DefaultShader.Config heredado) vale 0 -- la linterna del jugador (SpotLightEx
         // mas abajo) no se renderizaria en absoluto sin esto, sin ningun error visible (el shader
         // simplemente se compila sin soporte de luces spot).
+        aturdimientoLinterna = new AturdimientoLinterna(registry.getFlashlightBalance(), collisionWorld,
+                assets.getSound(SONIDO_ATURDIMIENTO));
+        aturdimientoLinterna.configurar(guardias);
+
         net.mgsx.gltf.scene3d.shaders.PBRShaderConfig pbrConfig = PBRShaderProvider.createDefaultConfig();
         pbrConfig.numBones = numBones;
         // 1 linterna + 3 faroles del estacionamiento + 2 faros del auto (SalidaExterior) + el foco del escenario de la
         // derrota definitiva (CinematicaDerrota).
         pbrConfig.numSpotLights = 7;
-        sceneManager = new SceneManager(PBRShaderProvider.createDefault(pbrConfig), PBRShaderProvider.createDefaultDepth(numBones));
+        // llave, EXIT interior/exterior, lampara de pared, ojos de la derrota y el chispazo del aturdimiento
+        pbrConfig.numPointLights = 6;
+        sceneManager = new SceneManager(PBRShaderProvider.createDefault(pbrConfig), PBRShaderProvider.createDefaultDepth(numBones)) {
+            @Override
+            public void render() {
+                // un solo punto para todos los estados (juego, cinematicas, jumpscare): culling antes de dibujar
+                culling.actualizar(camera);
+                super.render();
+            }
+
+            @Override
+            public void renderShadows() {
+                culling.antesDeSombras();
+                super.renderShadows();
+                culling.despuesDeSombras();
+            }
+        };
         sceneManager.addScene(mapScene);
         for (Entity guardia : engine.getEntities()) {
             if (Mappers.model.has(guardia)) {
@@ -757,6 +807,32 @@ public class GameplayScreen implements Screen {
         }
         sceneManager.setCamera(camera);
         salidaExterior.agregarAEscena(sceneManager, mapScene);
+        long tCulling = System.nanoTime();
+        com.badlogic.gdx.utils.ObjectSet<String> animadosMapa = new com.badlogic.gdx.utils.ObjectSet<>();
+        animadosMapa.addAll(mapDef.hingedDoors);
+        animadosMapa.addAll(mapDef.slidingDoors);
+        animadosMapa.add(mapDef.curtainNode);
+        animadosMapa.add(salidaExterior.getDefinicion().exitDoorNode);
+        culling.agregar(mapScene.modelInstance, 0, animadosMapa);
+        com.badlogic.gdx.utils.ObjectSet<String> animadosExterior = new com.badlogic.gdx.utils.ObjectSet<>();
+        animadosExterior.addAll("emergency_door_leaf", "gate_barrier_arm");
+        culling.agregar(salidaExterior.getEscenaExterior().modelInstance, 1, animadosExterior);
+        culling.agregar(salidaExterior.getEscenaAuto().modelInstance, 2, null);
+        culling.setSinFrustum(2, true);
+        culling.excluirDeSombras(salidaExterior.getEscenaExterior().modelInstance, "ext_contact_shadow", "ext_light_pool",
+                "ext_oil_stain", "ext_paper");
+        culling.excluirDeSombras(salidaExterior.getEscenaAuto().modelInstance, "car_contact_shadow");
+        // animatronicos (y la llave y Golden Freddy): esfera de 1.6 m alrededor de su posicion actual
+        for (Entity e : engine.getEntities()) {
+            if (Mappers.model.has(e)) {
+                culling.agregarDinamica(Mappers.model.get(e).scene.modelInstance, 1.6f, 1.0f);
+            }
+        }
+        // el exterior y el auto no se ven desde adentro: apagados hasta que se abre la puerta de salida
+        culling.setGrupoActivo(1, false);
+        culling.setGrupoActivo(2, false);
+        Gdx.app.log("GameplayScreen", "Culling: " + culling.getTotal() + " partes estaticas registradas en "
+                + (System.nanoTime() - tCulling) / 1_000_000L + " ms");
 
         // Sombras direccionales reales (nativas de gdx-gltf, DirectionalShadowLight extiende
         // DirectionalLightEx -- SceneManager.render() ya las detecta y renderiza automaticamente,
@@ -846,6 +922,12 @@ public class GameplayScreen implements Screen {
         luzLlave.position.set(mapDef.keyX, mapDef.keyY + 0.05f, mapDef.keyZ);
         sceneManager.environment.add(luzLlave);
 
+        chispaAturdimiento = new PointLightEx();
+        chispaAturdimiento.setColor(0.7f, 0.85f, 1f, 1f);
+        chispaAturdimiento.range = 2.2f;
+        chispaAturdimiento.intensity = 0f;
+        sceneManager.environment.add(chispaAturdimiento);
+
         skybox = new SceneSkybox(environmentCubemap);
         sceneManager.setSkyBox(skybox);
 
@@ -928,6 +1010,24 @@ public class GameplayScreen implements Screen {
 
         construirRutaCinematicaInicial();
         posicionarModelosParaCinematica();
+        precalentarShaders();
+    }
+
+    /** Dibuja una vez TODO (exterior incluido) en un framebuffer fuera de pantalla para que los shaders PBR de cada
+     * combinacion de material se compilen durante la carga y no al abrir la puerta de salida (CLAUDE.md §2.60). */
+    private void precalentarShaders() {
+        long t0 = System.nanoTime();
+        com.badlogic.gdx.graphics.glutils.FrameBuffer fb = new com.badlogic.gdx.graphics.glutils.FrameBuffer(
+                com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888, 256, 144, true);
+        culling.setTodoVisible(true);
+        fb.begin();
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(0f);
+        sceneManager.render();
+        fb.end();
+        culling.setTodoVisible(false);
+        fb.dispose();
+        Gdx.app.log("GameplayScreen", "Shaders precalentados en " + (System.nanoTime() - t0) / 1_000_000L + " ms");
     }
 
     /** Durante CINEMATICA_INICIAL, engine.update() nunca se llama (asi se congelan los 4
@@ -950,6 +1050,49 @@ public class GameplayScreen implements Screen {
         engine.removeSystem(aiSystemTemporal);
         engine.update(0f);
         engine.addSystem(aiSystemTemporal);
+    }
+
+    /** Puertas (las abre cualquiera: jugador o animatronicos) y cortina de Pirate Cove, que sigue a Foxy. */
+    private void actualizarMundoInteractivo(float dt, Vector3 posicionJugador) {
+        posicionesQueAbrenPuertas.clear();
+        posicionesQueAbrenPuertas.add(posicionJugador);
+        AIComponent foxy = null;
+        Vector3 posFoxy = null;
+        for (int i = 0; i < guardias.size; i++) {
+            Vector3 p = Mappers.transform.get(entidadesGuardias.get(i)).position;
+            posicionesQueAbrenPuertas.add(p);
+            if ("foxy".equals(guardias.get(i).id)) {
+                foxy = guardias.get(i);
+                posFoxy = p;
+            }
+        }
+        puertasInteriores.actualizar(dt, posicionesQueAbrenPuertas);
+        if (foxy != null) {
+            float xc = cortinaPirateCove.getXCentro();
+            boolean saliendo = foxy.stateMachine.getCurrentState() == ChaseState.INSTANCE && foxy.aturdidoRestante <= 0f
+                    && posFoxy.x < xc + 0.5f;
+            if (saliendo) {
+                cortinaPirateCove.abrir();
+            }
+            cortinaPirateCove.actualizar(dt, posFoxy.x > xc + 1.5f);
+        }
+    }
+
+    private static final float PASO_MAXIMO_MOVIMIENTO = 0.1f;
+    private final Vector3 tmpPasoMovimiento = new Vector3();
+
+    /** Resuelve el movimiento del jugador en sub-pasos de como mucho 0.1 m (CLAUDE.md §2.53). resolveMovement prueba
+     * solo la posicion de destino: con el sprint (5.8 m/s) y un frame largo (dt tope 0.1 s) el salto llegaba a
+     * 0.58 m, casi el ancho del jugador, y una pared sin grosor podia quedar "entre" origen y destino. */
+    private Vector3 resolverMovimientoEnPasos(Vector3 posicion, Vector3 delta, Vector3 semiExtensiones) {
+        float largo = delta.len();
+        int pasos = Math.max(1, MathUtils.ceil(largo / PASO_MAXIMO_MOVIMIENTO));
+        Vector3 actual = new Vector3(posicion);
+        tmpPasoMovimiento.set(delta).scl(1f / pasos);
+        for (int i = 0; i < pasos; i++) {
+            actual.set(collisionWorld.resolveMovement(actual, tmpPasoMovimiento, semiExtensiones, true));
+        }
+        return actual;
     }
 
     private Entity entidadDeGuardia(AIComponent ai) {
@@ -1363,6 +1506,8 @@ public class GameplayScreen implements Screen {
             return;
         }
         salidaExterior.abrirPuertaSalida();
+        culling.setGrupoActivo(1, true);
+        culling.setGrupoActivo(2, true);
         assets.getSound(SalidaExterior.SONIDO_PUERTA_SALIDA).play(1f);
         interactivoPuertaSalida.activo = false;
         interactivoBarraEmergencia.activo = true;
@@ -1872,6 +2017,9 @@ public class GameplayScreen implements Screen {
             case CINEMATICA_INICIAL:
                 actualizarCinematicaInicial(dt);
                 return;
+            case INSTRUCCIONES:
+                actualizarInstrucciones(dt);
+                return;
             case INTRO_CORAZONES:
                 actualizarIntroCorazones(dt);
                 return;
@@ -1935,7 +2083,7 @@ public class GameplayScreen implements Screen {
         Vector3 desiredDelta = cameraController.computeWasdDelta(dt);
 
         CollisionComponent playerCollision = Mappers.collision.get(playerEntity);
-        Vector3 resolved = collisionWorld.resolveMovement(playerTransform.position, desiredDelta, playerCollision.halfExtents, true);
+        Vector3 resolved = resolverMovimientoEnPasos(playerTransform.position, desiredDelta, playerCollision.halfExtents);
         // Distancia REAL recorrida este frame (post-colision, no el input crudo) -- ver
         // FirstPersonCameraController.actualizarBob(): si el jugador queda deslizandose contra
         // una pared, el bob se ralentiza junto con el movimiento real en vez de seguir a
@@ -1959,7 +2107,16 @@ public class GameplayScreen implements Screen {
         linternaJugador.direction.set(camera.direction);
         linternaJugador.intensity = linternaEncendida ? LINTERNA_INTENSIDAD_ENCENDIDA : 0f;
 
+        AIComponent recienAturdido = aturdimientoLinterna.actualizar(guardias, entidadesGuardias, camera, linternaEncendida);
+        if (recienAturdido != null) {
+            TransformComponent t = Mappers.transform.get(entidadDeGuardia(recienAturdido));
+            chispaAturdimiento.position.set(t.position.x, t.position.y + 1.7f, t.position.z);
+            chispaRestante = 0.22f;
+        }
+        chispaRestante = Math.max(0f, chispaRestante - dt);
+        chispaAturdimiento.intensity = chispaRestante > 0f ? 6f * (MathUtils.randomBoolean(0.7f) ? 1f : 0.2f) : 0f;
         engine.update(dt);
+        actualizarMundoInteractivo(dt, playerTransform.position);
         salidaExterior.actualizar(dt);
         actualizarFreddyEnPuerta(playerTransform.position);
         actualizarAmbienteNoche(dt);
@@ -2232,7 +2389,8 @@ public class GameplayScreen implements Screen {
         if (tiempoEnEstado == 0f) {
             sceneManager.setAmbientLight(AMBIENTE_CINEMATICA);
             luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_CINEMATICA;
-            sonidoEscape.play();
+            idSonidoEscape = sonidoEscape.play();
+            omisionIntro = new OmitirCinematica(Lang.get(handoff.idioma, "cinematic.skip"));
         }
         tiempoEnEstado += dt;
         float t = Math.min(tiempoEnEstado, duracionCinematicaInicial);
@@ -2280,12 +2438,109 @@ public class GameplayScreen implements Screen {
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
 
-        if (tiempoEnEstado >= duracionCinematicaInicial) {
-            sceneManager.setAmbientLight(AMBIENTE_JUGANDO);
-            luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_JUGANDO;
+        omisionIntro.dibujar(uiBatch, uiShapes, uiFont, 0f);
+        boolean omitida = omisionIntro.actualizar(dt);
+        if (omitida || tiempoEnEstado >= duracionCinematicaInicial) {
+            finalizarIntro(omitida);
+        }
+    }
+
+    /** Unico cierre de la introduccion (completa u omitida): mismo estado final en los dos casos -- luces de juego,
+     * camara en el punto de inicio del jugador y la pantalla de instrucciones con el mundo detenido. */
+    private void finalizarIntro(boolean omitida) {
+        if (omitida && idSonidoEscape != -1) {
+            sonidoEscape.stop(idSonidoEscape);
+        }
+        idSonidoEscape = -1;
+        sceneManager.setAmbientLight(AMBIENTE_JUGANDO);
+        luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_JUGANDO;
+        TransformComponent jugador = Mappers.transform.get(playerEntity);
+        cameraController.resetOrientation(mapDef.playerStartYawDegrees);
+        cameraController.applyToCamera(jugador.position);
+        estado = EstadoPartida.INSTRUCCIONES;
+        tiempoEnEstado = 0f;
+        Gdx.app.log("GameplayScreen", "Introduccion " + (omitida ? "omitida" : "completa") + " -> instrucciones");
+    }
+
+    // ------------------------------------------------------------------
+    // Instrucciones previas (CLAUDE.md §2.52): el mundo esta detenido (sin engine.update, sin movimiento, sin
+    // linterna, sceneManager.update(0)) hasta que el jugador elige empezar.
+    // ------------------------------------------------------------------
+
+    private static final String[][] FILAS_INSTRUCCIONES = {
+            {"instr.move", "instr.move.key"}, {"instr.look", "instr.look.key"}, {"instr.sprint", "instr.sprint.key"},
+            {"instr.flashlight", "instr.flashlight.key"}, {"instr.interact", "instr.interact.key"},
+            {"instr.pause", "instr.pause.key"}};
+
+    private void actualizarInstrucciones(float dt) {
+        tiempoEnEstado += dt;
+        linternaJugador.position.set(camera.position);
+        linternaJugador.direction.set(camera.direction);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(0f);
+        sceneManager.render();
+        dibujarInstrucciones();
+        // Breve gracia (0.35 s) para que una tecla que venia apretada de la intro no la cierre sin querer.
+        boolean empezar = tiempoEnEstado > 0.35f && (Gdx.input.isKeyJustPressed(Input.Keys.E)
+                || Gdx.input.isKeyJustPressed(Input.Keys.ENTER) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)
+                || Gdx.input.justTouched());
+        if (empezar) {
             estado = EstadoPartida.INTRO_CORAZONES;
             tiempoEnEstado = 0f;
         }
+    }
+
+    private void dibujarInstrucciones() {
+        float w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
+        float panelW = Math.min(760f, w - 80f), panelH = Math.min(520f, h - 80f);
+        float px = (w - panelW) / 2f, py = (h - panelH) / 2f;
+        float aparicion = MathUtils.clamp(tiempoEnEstado / 0.4f, 0f, 1f);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(0f, 0f, 0f, 0.6f * aparicion);
+        uiShapes.rect(0, 0, w, h);
+        uiShapes.setColor(0.04f, 0.035f, 0.04f, 0.92f * aparicion);
+        uiShapes.rect(px, py, panelW, panelH);
+        uiShapes.setColor(0.55f, 0.08f, 0.06f, aparicion);
+        uiShapes.rect(px, py + panelH - 4f, panelW, 4f);
+        uiShapes.setColor(1f, 1f, 1f, 0.08f * aparicion);
+        float filaY0 = py + panelH - 118f;
+        for (int i = 0; i < FILAS_INSTRUCCIONES.length; i++) {
+            if (i % 2 == 0) {
+                uiShapes.rect(px + 40f, filaY0 - i * 38f - 26f, panelW - 80f, 34f);
+            }
+        }
+        uiShapes.end();
+
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        uiBatch.begin();
+        float escala = uiFont.getScaleX();
+        uiFont.getData().setScale(2.1f);
+        uiFont.setColor(1f, 1f, 1f, aparicion);
+        GlyphLayout titulo = new GlyphLayout(uiFont, Lang.get(handoff.idioma, "instr.title"));
+        uiFont.draw(uiBatch, titulo, px + (panelW - titulo.width) / 2f, py + panelH - 32f);
+        uiFont.getData().setScale(1.25f);
+        for (int i = 0; i < FILAS_INSTRUCCIONES.length; i++) {
+            float y = filaY0 - i * 38f;
+            uiFont.setColor(0.82f, 0.82f, 0.82f, aparicion);
+            uiFont.draw(uiBatch, Lang.get(handoff.idioma, FILAS_INSTRUCCIONES[i][0]), px + 64f, y);
+            uiFont.setColor(1f, 0.86f, 0.55f, aparicion);
+            GlyphLayout tecla = new GlyphLayout(uiFont, Lang.get(handoff.idioma, FILAS_INSTRUCCIONES[i][1]));
+            uiFont.draw(uiBatch, tecla, px + panelW - 64f - tecla.width, y);
+        }
+        uiFont.getData().setScale(1.15f);
+        uiFont.setColor(0.9f, 0.9f, 0.9f, aparicion);
+        float objetivoY = filaY0 - FILAS_INSTRUCCIONES.length * 38f - 18f;
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "instr.objective"), px + 64f, objetivoY, panelW - 128f, com.badlogic.gdx.utils.Align.center, true);
+        float pulso = 0.55f + 0.45f * MathUtils.sin(tiempoEnEstado * 3.2f);
+        uiFont.setColor(1f, 1f, 1f, aparicion * pulso);
+        GlyphLayout empezar = new GlyphLayout(uiFont, Lang.get(handoff.idioma, "instr.start"));
+        uiFont.draw(uiBatch, empezar, px + (panelW - empezar.width) / 2f, py + 42f);
+        uiFont.setColor(Color.WHITE);
+        uiFont.getData().setScale(escala);
+        uiBatch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
     // ------------------------------------------------------------------
@@ -2520,6 +2775,8 @@ public class GameplayScreen implements Screen {
     /** Reaparece al jugador y devuelve a los 4 guardias a su spawn original con su IA reiniciada
      * (si no, quedarian donde persiguieron/atraparon, rompiendo la sensacion de reinicio limpio). */
     private void respawnJugador() {
+        aturdimientoLinterna.reiniciar(guardias);
+        cortinaPirateCove.cerrarAlInstante();
         TransformComponent playerTransform = Mappers.transform.get(playerEntity);
         playerTransform.position.set(mapDef.playerStartX, mapDef.playerStartY, mapDef.playerStartZ);
         playerTransform.yawDegrees = mapDef.playerStartYawDegrees;
@@ -2647,6 +2904,7 @@ public class GameplayScreen implements Screen {
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.look"), x + 18f, yDibujo + AYUDA_ALTO - 74f);
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.flashlight"), x + 18f, yDibujo + AYUDA_ALTO - 100f);
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.interact"), x + 18f, yDibujo + AYUDA_ALTO - 126f);
+        uiFont.draw(uiBatch, Lang.get(handoff.idioma, "help.sprint"), x + 18f, yDibujo + AYUDA_ALTO - 152f);
         uiFont.setColor(Color.WHITE);
         uiBatch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
@@ -2712,7 +2970,9 @@ public class GameplayScreen implements Screen {
         ai.objetivo = playerEntity;
         ai.collisionWorld = collisionWorld;
         ai.siempreEnPersecucion = persigueSiempre;
+        ai.id = entityId;
         guardias.add(ai);
+        entidadesGuardias.add(entidad);
         guardiaSpawns.add(new Vector3(posicion));
         if (persigueSiempre) {
             // Unico guardia con persigueSiempre=true es Freddy (ver decision de diseno del

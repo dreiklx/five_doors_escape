@@ -32,6 +32,17 @@ public class ContentRegistry {
     }
 
     private ExteriorDefinition exteriorCache;
+    private FlashlightBalance linternaCache;
+
+    /** Equilibrio del aturdimiento con la linterna (content/balance/flashlight.json), ver FlashlightBalance. */
+    public FlashlightBalance getFlashlightBalance() {
+        if (linternaCache == null) {
+            Json lector = new Json();
+            lector.setElementType(FlashlightBalance.class, "stun", FlashlightBalance.Stun.class);
+            linternaCache = lector.fromJson(FlashlightBalance.class, Gdx.files.internal("content/balance/flashlight.json"));
+        }
+        return linternaCache;
+    }
 
     /** Exterior de la victoria (content/maps/exterior.json), ver ExteriorDefinition. */
     public ExteriorDefinition getExteriorDefinition() {

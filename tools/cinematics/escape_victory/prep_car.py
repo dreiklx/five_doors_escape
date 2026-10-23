@@ -195,6 +195,78 @@ for o in bpy.data.objects:
         o.data.set_sharp_from_angle(angle=math.radians(35))
     except Exception:
         pass
+# --- detalle v2 (CLAUDE.md §2.61): matriculas, retrovisores, manijas, escape, limpiaparabrisas, espejo interior,
+# indicadores del tablero (material car_gauges, emisivo apagado: el juego lo enciende al arrancar) y sombra de contacto
+cromo = reemplazo['Grey']; plast = plastico
+placa_mat = material('car_plate', (0.82, 0.8, 0.7), 0.6)
+for nombre, y in (('car_plate_front', mn.y - 0.005), ('car_plate_rear', mx.y + 0.005)):
+    caja(nombre, V((0, y, mn.z + 0.32)), V((0.52, 0.012, 0.13)), placa_mat, 0)
+    cu = bpy.data.curves.new(nombre + '_txt', 'FONT'); cu.body = 'FAZ 1987'; cu.size = 0.075; cu.align_x = 'CENTER'; cu.align_y = 'CENTER'; cu.extrude = 0.002
+    t = bpy.data.objects.new(nombre + '_txt', cu); bpy.context.scene.collection.objects.link(t)
+    t.location = V((0, y + (-0.008 if y < 0 else 0.008), mn.z + 0.32)); t.rotation_euler = (math.radians(90), 0, math.radians(0 if y < 0 else 180))
+    bpy.context.view_layer.objects.active = t; t.select_set(True); bpy.ops.object.convert(target='MESH'); t.select_set(False)
+    t.data.materials.clear(); t.data.materials.append(material(nombre + '_ink', (0.03, 0.05, 0.25), 0.6))
+for lado in (1, -1):
+    xm = lado * (ancho / 2 + 0.06)
+    caja('car_mirror_%d' % lado, V((xm, y_frente_puerta + 0.05, techo_en(y_frente_puerta) - 0.42)), V((0.13, 0.06, 0.09)), reemplazo['Blue'])
+    caja('car_handle_%d' % lado, V((lado * (ancho / 2 + 0.005), y_pilar_b - 0.12, z_umbral + 0.42)), V((0.02, 0.14, 0.025)), cromo, 0.005)
+bpy.ops.mesh.primitive_cylinder_add(radius=0.035, depth=0.22, vertices=12, location=V((-0.55, mx.y + 0.02, mn.z + 0.12)))
+esc = bpy.context.object; esc.name = 'car_exhaust'; esc.rotation_euler = (math.radians(90), 0, 0); esc.data.materials.append(cromo)
+for k, xw in enumerate((-0.32, 0.32)):
+    w_ = caja('car_wiper_%d' % k, V((xw, y_parabrisas - 0.02, techo_en(y_parabrisas) - 0.55)), V((0.5, 0.015, 0.012)), plast, 0)
+    w_.rotation_euler.y = math.radians(-12 if k == 0 else 12)
+caja('car_rearview', V((0, y_parabrisas + 0.42, techo_en(y_parabrisas + 0.42) - 0.08)), V((0.22, 0.03, 0.06)), plast, 0.01)
+# indicadores: panel delgado en la cara trasera del tablero (no asoma por encima), con una textura emisiva de dos
+# esferas con aguja; el juego multiplica el emisivo por su color al arrancar (apagado = 0)
+img_g = bpy.data.images.new('tex_car_gauges', 256, 64, alpha=False)
+import numpy as _npg
+gy, gx = _npg.mgrid[0:64, 0:256].astype(_npg.float32)
+lum = _npg.zeros_like(gx)
+for cx, ang in ((64, 2.2), (192, 0.9)):
+    dx, dy = gx - cx, gy - 32; r = _npg.sqrt(dx * dx + dy * dy)
+    lum = _npg.maximum(lum, _npg.clip(1 - _npg.abs(r - 26) / 2.2, 0, 1))                 # aro
+    a_t = _npg.arctan2(dy, dx)
+    for k in range(9):                                                                         # marcas
+        t_ang = math.pi * (0.85 + 1.3 * k / 8)
+        d_ang = _npg.abs(_npg.angle(_npg.exp(1j * (a_t - t_ang))))
+        lum = _npg.maximum(lum, ((d_ang < 0.05) & (r > 19) & (r < 24)).astype(_npg.float32) * 0.8)
+    nx, ny = math.cos(math.pi + ang), math.sin(math.pi + ang)                                  # aguja
+    proy = dx * nx + dy * ny; perp = _npg.abs(dx * ny - dy * nx)
+    lum = _npg.maximum(lum, ((proy > -3) & (proy < 22) & (perp < 1.4)).astype(_npg.float32))
+    lum = _npg.maximum(lum, _npg.clip(1 - r / 30, 0, 1) * 0.18)                                # resplandor
+img_g.pixels.foreach_set(_npg.stack([lum * 0.45, lum, lum * 0.62, _npg.ones_like(lum)], -1)[::-1].reshape(-1))
+img_g.filepath_raw = os.path.join(SHOTS, 'tex_car_gauges.png'); img_g.file_format = 'PNG'; img_g.save()
+gauges = material('car_gauges', (0.01, 0.012, 0.01), 0.5)
+tg = gauges.node_tree.nodes.new('ShaderNodeTexImage'); tg.image = img_g
+pg = gauges.node_tree.nodes['Principled BSDF']
+gauges.node_tree.links.new(tg.outputs['Color'], pg.inputs['Emission Color']); pg.inputs['Emission Strength'].default_value = 1.0
+y_g = y_parabrisas + 0.33 + 0.15 + 0.006; z_g = techo_en(y_parabrisas + 0.33) - 0.30 - 0.065
+bm_g = bmesh.new(); uv_g = bm_g.loops.layers.uv.new()
+vs_g = [bm_g.verts.new(V((x_cond + dx, y_g, z_g + dz))) for dx, dz in ((0.15, -0.0375), (-0.15, -0.0375), (-0.15, 0.0375), (0.15, 0.0375))]
+f_g = bm_g.faces.new(vs_g)
+for l, uv in zip(f_g.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+    l[uv_g].uv = uv
+me_g = bpy.data.meshes.new('car_gauges'); bm_g.to_mesh(me_g); bm_g.free(); me_g.materials.append(gauges)
+o_g = bpy.data.objects.new('car_gauges', me_g); bpy.context.scene.collection.objects.link(o_g)
+# sombra de contacto: quad con degradado radial (alfa) bajo el auto, se mueve con el
+img = bpy.data.images.new('tex_car_shadow', 128, 128, alpha=True)
+import numpy as _np
+yy, xx = _np.mgrid[0:128, 0:128] / 127.0 * 2 - 1
+rr = _np.sqrt((xx / 0.92) ** 2 + (yy / 0.97) ** 2)
+al = _np.clip(1 - rr, 0, 1) ** 1.2 * 0.8
+img.pixels.foreach_set(_np.stack([_np.zeros_like(al)] * 3 + [al], -1).astype(_np.float32).reshape(-1))
+img.filepath_raw = os.path.join(SHOTS, 'tex_car_shadow.png'); img.file_format = 'PNG'; img.save()
+sm = bpy.data.materials.new('car_contact_shadow'); sm.use_nodes = True
+tx = sm.node_tree.nodes.new('ShaderNodeTexImage'); tx.image = img
+pb = sm.node_tree.nodes['Principled BSDF']; pb.inputs['Base Color'].default_value = (0, 0, 0, 1)
+sm.node_tree.links.new(tx.outputs['Alpha'], pb.inputs['Alpha'])
+try:
+    sm.surface_render_method = 'BLENDED'
+except Exception:
+    sm.blend_method = 'BLEND'
+bpy.ops.mesh.primitive_plane_add(size=1, location=V((0, 0, mn.z - 0.19)))
+so = bpy.context.object; so.name = 'car_shadow'; so.scale = (ancho + 0.5, largo + 0.6, 1); bpy.ops.object.transform_apply(scale=True)
+so.data.materials.append(sm)
 body.name = 'car_body'; w_fl.name = 'car_wheel_fl'; w_fr.name = 'car_wheel_fr'; w_r.name = 'car_wheels_rear'
 raiz = bpy.data.objects.new('car', None); bpy.context.scene.collection.objects.link(raiz)
 for o in bpy.data.objects:

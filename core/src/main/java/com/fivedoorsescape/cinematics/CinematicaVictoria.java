@@ -29,7 +29,7 @@ import com.fivedoorsescape.world.SalidaExterior;
  *  7.4-11.4  arranca: sale del espacio, se levanta la barrera, cruza el porton y dobla hacia la calle
  * 11.4-16.5  corte a una camara fija en la calle: el auto pasa y se aleja; quedan el letrero y la pizzeria; negro
  *
- * ESC o ENTER la saltan desde el primer segundo. El auto se mueve por una trayectoria fija calculada a partir de
+ * Se omite manteniendo ESC ~1.2 s (OmitirCinematica, CLAUDE.md §2.51). El auto se mueve por una trayectoria fija calculada a partir de
  * exterior.json (recta, curva de radio 5.5 m que pasa por el porton y recta por la calle) y sus ruedas giran segun la
  * distancia real recorrida.
  */
@@ -49,7 +49,6 @@ public class CinematicaVictoria {
             SONIDO_MARCHA, SONIDO_BARRERA};
 
     public static final float DURACION = 16.5f;
-    private static final float SALTO_PERMITIDO_DESDE = 1.0f;
     private static final float T_SENTADO = 2.9f;
     private static final float T_CIERRA = 3.25f;
     private static final float T_FAROS = 5.0f;
@@ -69,7 +68,7 @@ public class CinematicaVictoria {
     private final AssetService assets;
     private final ControlAmbiente ambiente;
     private final Runnable colocarFreddyEnPuerta;
-    private final String textoSaltar;
+    private final OmitirCinematica omision;
 
     private float t = 0f;
     private boolean terminada = false;
@@ -112,7 +111,7 @@ public class CinematicaVictoria {
         this.assets = assets;
         this.ambiente = ambiente;
         this.colocarFreddyEnPuerta = colocarFreddyEnPuerta;
-        this.textoSaltar = textoSaltar;
+        this.omision = new OmitirCinematica(textoSaltar);
         construirRuta();
     }
 
@@ -170,7 +169,7 @@ public class CinematicaVictoria {
             return true;
         }
         t += dt;
-        if (t >= SALTO_PERMITIDO_DESDE && (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER))) {
+        if (omision.actualizar(dt)) {
             saltada = true;
             terminar();
             return true;
@@ -365,19 +364,10 @@ public class CinematicaVictoria {
             shapes.rect(0, 0, w, h);
         }
         shapes.end();
-        if (t > SALTO_PERMITIDO_DESDE && t < T_FUNDIDO) {
-            batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
-            batch.begin();
-            float escala = fuente.getScaleX();
-            fuente.getData().setScale(0.85f);
-            GlyphLayout layout = new GlyphLayout(fuente, textoSaltar);
-            fuente.setColor(1f, 1f, 1f, 0.45f);
-            fuente.draw(batch, layout, w - layout.width - 24f, barras * 0.5f + layout.height / 2f + 2f);
-            fuente.setColor(Color.WHITE);
-            fuente.getData().setScale(escala);
-            batch.end();
-        }
         Gdx.gl.glDisable(GL20.GL_BLEND);
+        if (t < T_FUNDIDO) {
+            omision.dibujar(batch, shapes, fuente, barras);
+        }
     }
 
     public boolean fueSaltada() {

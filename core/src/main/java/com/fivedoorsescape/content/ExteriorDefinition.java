@@ -59,6 +59,10 @@ public class ExteriorDefinition {
     public float freddyDoorZ;
 
     public Lamp[] lamps;
+    /** Contenedor de basura (geometria propia de build_exterior.py, detalle v2). */
+    public Punto dumpster;
+    /** Colliders extra de decoracion solida: [x, z, semiX, semiZ]. */
+    public float[][] extraColliders = new float[0][];
     public WallLamp wallLamp;
     public Prop[] props;
 
@@ -69,6 +73,11 @@ public class ExteriorDefinition {
         public float height;
         public float intensity;
         public boolean flicker;
+    }
+
+    public static class Punto {
+        public float x;
+        public float z;
     }
 
     public static class WallLamp {

@@ -92,4 +92,14 @@ public class MapDefinition {
     public float defeatWitnessBZ = -2.7f;
     public float defeatStageX = 0f;
     public float defeatStageZ = -8.1f;
+
+    /** Nodos del mapa que se retiran al cargar (geometria y, por lo tanto, colision): la mesa de Parts and Service
+     * que estorbaba la salida del deposito (CLAUDE.md §2.55). */
+    public String[] removeNodes = new String[0];
+    /** Puertas interiores (CLAUDE.md §2.56): abatibles (giran sobre una bisagra) y las dos puertas de seguridad de la
+     * oficina, que en FNAF bajan y suben (corredizas verticales). La de salida es un caso aparte (SalidaExterior). */
+    public String[] hingedDoors = new String[0];
+    public String[] slidingDoors = new String[0];
+    /** Cortina de Pirate Cove, animada cuando Foxy sale (CLAUDE.md §2.57). */
+    public String curtainNode = "";
 }

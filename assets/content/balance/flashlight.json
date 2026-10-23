@@ -1,0 +1,10 @@
+{
+    "beamRange": 11.0,
+    "beamHalfAngleDegrees": 22.0,
+    "targetHeight": 1.15,
+    "stun": {
+        "foxy":   { "cycles": 5,  "seconds": 1.5 },
+        "bonnie": { "cycles": 10, "seconds": 1.5 },
+        "chica":  { "cycles": 10, "seconds": 1.5 }
+    }
+}

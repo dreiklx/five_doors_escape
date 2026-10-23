@@ -174,6 +174,18 @@ public class LevelLoader {
             material.set(IntAttribute.createCullFace(0));
         }
 
+        // Nodos retirados por definicion del mapa (CLAUDE.md §2.55): se vacian sus partes antes de generar colisiones,
+        // asi desaparecen la geometria y su collider sin tocar pizzeria.glb.
+        for (String id : def.removeNodes) {
+            Node nodo = mapScene.modelInstance.getNode(id, true);
+            if (nodo != null) {
+                vaciar(nodo);
+                com.badlogic.gdx.Gdx.app.log("LevelLoader", "Nodo retirado del mapa: " + id);
+            } else {
+                com.badlogic.gdx.Gdx.app.log("LevelLoader", "ADVERTENCIA: nodo a retirar no encontrado: " + id);
+            }
+        }
+
         return mapScene;
     }
 
@@ -185,6 +197,12 @@ public class LevelLoader {
      * igualmente intransitable.
      */
     private static final float DOOR_CLEARANCE_MARGIN = 0.4f;
+
+    /** Margen a lo largo del ANCHO de la puerta (en la direccion de la pared), CLAUDE.md §2.53. Antes se usaba
+     * DOOR_CLEARANCE_MARGIN en los dos ejes: eso borraba 0.4-0.6 m de pared solida a cada lado del marco y el jugador
+     * podia meterse en la pared junto a la puerta y ver a traves. Ahora el margen grande solo va en el eje del grosor
+     * (para despejar las celdas de la pared en el vano) y a lo largo del ancho apenas 5 cm. */
+    private static final float DOOR_WIDTH_MARGIN = 0.05f;
 
     /**
      * Radio (unidades de mundo, X/Z) alrededor de la puerta de salida real dentro del cual una
@@ -289,10 +307,21 @@ public class LevelLoader {
                 boolean esPuertaDeSalida = (dx * dx + dz * dz)
                         <= RADIO_EXCLUSION_PUERTA_SALIDA * RADIO_EXCLUSION_PUERTA_SALIDA;
                 if (!esPuertaDeSalida) {
-                    nodeBox.min.x -= DOOR_CLEARANCE_MARGIN;
-                    nodeBox.max.x += DOOR_CLEARANCE_MARGIN;
-                    nodeBox.min.z -= DOOR_CLEARANCE_MARGIN;
-                    nodeBox.max.z += DOOR_CLEARANCE_MARGIN;
+                    if (esParteDeCortina(node)) {
+                        // la cortina conserva el comportamiento anterior (zona ancha, solo bloquea al jugador)
+                        nodeBox.min.x -= DOOR_CLEARANCE_MARGIN;
+                        nodeBox.max.x += DOOR_CLEARANCE_MARGIN;
+                        nodeBox.min.z -= DOOR_CLEARANCE_MARGIN;
+                        nodeBox.max.z += DOOR_CLEARANCE_MARGIN;
+                    } else {
+                        boolean delgadaEnX = (nodeBox.max.x - nodeBox.min.x) < (nodeBox.max.z - nodeBox.min.z);
+                        float mx = delgadaEnX ? DOOR_CLEARANCE_MARGIN : DOOR_WIDTH_MARGIN;
+                        float mz = delgadaEnX ? DOOR_WIDTH_MARGIN : DOOR_CLEARANCE_MARGIN;
+                        nodeBox.min.x -= mx;
+                        nodeBox.max.x += mx;
+                        nodeBox.min.z -= mz;
+                        nodeBox.max.z += mz;
+                    }
                     out.add(nodeBox);
                 }
             }
@@ -305,6 +334,13 @@ public class LevelLoader {
 
     /** True si este nodo o alguno de sus ancestros es especificamente la cortina de Pirate Cove
      * ("CORTINA_37"), no cualquier puerta -- ver bloqueo solo-jugador en collectDoorZones. */
+    private static void vaciar(Node nodo) {
+        nodo.parts.clear();
+        for (Node hijo : nodo.getChildren()) {
+            vaciar(hijo);
+        }
+    }
+
     private boolean esParteDeCortina(Node node) {
         Node actual = node;
         while (actual != null) {

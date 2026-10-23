@@ -12,6 +12,9 @@ import com.fivedoorsescape.world.CollisionWorld;
 public class AIComponent implements Component {
 
     public StateMachine<Entity, State<Entity>> stateMachine;
+    /** Id de la entidad ("freddy", "bonnie", "chica", "foxy"): lo usan la cortina de Pirate Cove y el aturdimiento
+     * con la linterna (content/balance/flashlight.json). */
+    public String id = "";
     public Entity objetivo;
     /** Mismo CollisionWorld que usa el jugador -- ChaseState lo necesita para no atravesar paredes. */
     public CollisionWorld collisionWorld;
@@ -33,4 +36,13 @@ public class AIComponent implements Component {
     public float distanciaMuestreada = Float.NaN;
     public float temporizadorMuestra = 0f;
     public float tiempoAtascado = 0f;
+
+    // Aturdimiento con la linterna (CLAUDE.md §2.58, AturdimientoLinterna). Umbral y duracion vienen de
+    // content/balance/flashlight.json; 0 = no se aturde (Freddy).
+    public int destellosParaAturdir = 0;
+    public float duracionAturdimiento = 0f;
+    public int destellos = 0;
+    public boolean iluminadoEnCiclo = false;
+    public float aturdidoRestante = 0f;
+    public float yawAntesDeAturdir = 0f;
 }

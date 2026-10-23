@@ -20,6 +20,10 @@ public class FirstPersonCameraController {
 
     private float mouseSensitivity = 0.15f;
     private float moveSpeed = 3.5f;
+    /** Sprint (CLAUDE.md §2.54): mantener SHIFT multiplica la velocidad (3.5 -> 5.8 m/s). Sin resistencia ni cansancio
+     * (pedido explicito). El balanceo de cabeza ya escala con la distancia real recorrida (actualizarBob). */
+    public static final float MULTIPLICADOR_SPRINT = 1.65f;
+    private boolean corriendo = false;
 
     // Head bob (pedido explicito del usuario 2026-08-10: "que se sienta mas como que el jugador
     // realmente esta caminando", muy sutil, sin marear). Puramente cosmetico -- ver aplicarBob():
@@ -84,8 +88,10 @@ public class FirstPersonCameraController {
 
         delta.x = dirX * forward + rightX * strafe;
         delta.z = dirZ * forward + rightZ * strafe;
+        corriendo = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT) || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT);
         if (delta.len2() > 0.0001f) {
-            delta.nor().scl(moveSpeed * deltaTime);
+            // normalizado antes de escalar: en diagonal no se corre mas rapido
+            delta.nor().scl(moveSpeed * (corriendo ? MULTIPLICADOR_SPRINT : 1f) * deltaTime);
         }
         return delta;
     }
@@ -133,6 +139,10 @@ public class FirstPersonCameraController {
         }
 
         camera.update();
+    }
+
+    public boolean isCorriendo() {
+        return corriendo;
     }
 
     public float getYawDegrees() {

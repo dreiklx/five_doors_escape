@@ -362,6 +362,264 @@ for i in range(9):
         wy = random.uniform(1.5, alto - 1.5); wz = bz + random.uniform(-ancho / 2 + 0.8, ancho / 2 - 0.8)
         caja('far_window_%d_%d' % (i, k), (bx + 0.01, wy, wz - 0.4), (bx + 0.03, wy + 0.6, wz + 0.4), ventana_luz)
 
+
+# ================================================================ detalle v2 (CLAUDE.md §2.61)
+# Todo lo de esta seccion es decoracion sin colision salvo el contenedor (collider en exterior.json, "extraColliders").
+import numpy as np
+
+# texturas procedurales intermedias: fuera de assets/ (el GLB las lleva embebidas)
+import tempfile
+TMP = tempfile.mkdtemp(prefix="fde_ext_")
+
+
+def textura_procedural(nombre, funcion, lado=256):
+    """Genera una textura RGBA en disco a partir de funcion(x, y) -> (r, g, b, a) en [0, 1] (arrays numpy)."""
+    yy, xx = np.mgrid[0:lado, 0:lado] / (lado - 1.0) * 2 - 1
+    r, g, b, a = funcion(xx, yy)
+    img = bpy.data.images.new(nombre, lado, lado, alpha=True)
+    px = np.stack([r, g, b, a], axis=-1).astype(np.float32)[::-1].reshape(-1)
+    img.pixels.foreach_set(px)
+    ruta = os.path.join(TMP, nombre + '.png')
+    img.filepath_raw = ruta; img.file_format = 'PNG'; img.save()
+    return img
+
+
+def mat_decal(nombre, img, color=(1, 1, 1), emis=None, fuerza=0.0, rug=0.9):
+    m = bpy.data.materials.new(nombre); m.use_nodes = True
+    nt = m.node_tree; p = nt.nodes['Principled BSDF']
+    tx = nt.nodes.new('ShaderNodeTexImage'); tx.image = img
+    p.inputs['Base Color'].default_value = (*color, 1); p.inputs['Roughness'].default_value = rug
+    nt.links.new(tx.outputs['Alpha'], p.inputs['Alpha'])
+    if emis:
+        p.inputs['Emission Color'].default_value = (*emis, 1); p.inputs['Emission Strength'].default_value = fuerza
+    try:
+        m.surface_render_method = 'BLENDED'
+    except Exception:
+        m.blend_method = 'BLEND'
+    return m
+
+
+def quad(nombre, cx, y, cz, ancho, largo, yaw, mat, uv_tam=None):
+    """Quad horizontal en el suelo (coordenadas del juego), girado yaw grados."""
+    bm = bmesh.new(); c, s = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+    vs = []
+    for dx, dz, u, v in ((-ancho / 2, -largo / 2, 0, 0), (ancho / 2, -largo / 2, 1, 0), (ancho / 2, largo / 2, 1, 1), (-ancho / 2, largo / 2, 0, 1)):
+        x = cx + dx * c + dz * s; z = cz - dx * s + dz * c
+        vs.append(bm.verts.new(G(x, y, z)))
+    f = bm.faces.new(vs)
+    if f.normal.z < 0:
+        f.normal_flip()
+    uv = bm.loops.layers.uv.new()
+    for l, (u, v) in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+        l[uv].uv = (u, v)
+    me = bpy.data.meshes.new(nombre); bm.to_mesh(me); bm.free()
+    o = bpy.data.objects.new(nombre, me); sc.collection.objects.link(o); o.data.materials.append(mat)
+    if uv_tam:
+        uv_mundo(o, uv_tam)
+    return o
+
+
+rng_d = random.Random(4242)
+# --- texturas procedurales: sombra de contacto, charco de luz, mancha de aceite, papel
+def f_sombra(x, y):
+    r = np.sqrt(x * x + y * y); a = np.clip(1 - r, 0, 1) ** 1.6 * 0.75
+    z = np.zeros_like(r); return z, z, z, a
+def f_pozo(x, y):
+    r = np.sqrt(x * x + y * y); a = np.clip(1 - r, 0, 1) ** 2.2 * 0.5
+    return np.ones_like(r), np.full_like(r, 0.62), np.full_like(r, 0.32), a
+def f_aceite(x, y):
+    ang = np.arctan2(y, x); r = np.sqrt(x * x + y * y)
+    borde = 0.62 + 0.18 * np.sin(ang * 3 + 1.3) + 0.1 * np.sin(ang * 7 + 0.4)
+    a = np.clip((borde - r) * 5, 0, 1) * (0.55 + 0.25 * np.sin(x * 9 + y * 5))
+    return np.full_like(r, 0.04), np.full_like(r, 0.03), np.full_like(r, 0.025), np.clip(a, 0, 0.85)
+def f_papel(x, y):
+    a = ((np.abs(x) < 0.82) & (np.abs(y) < 0.95)).astype(np.float32)
+    lineas = (np.sin((y + 1) * 40) > 0.85) & (np.abs(x) < 0.6)
+    tono = np.where(lineas, 0.45, 0.82); return tono, tono, tono * 0.92, a
+
+
+mat_sombra = mat_decal('ext_contact_shadow', textura_procedural('tex_contact_shadow', f_sombra))
+mat_pozo = mat_decal('ext_light_pool', textura_procedural('tex_light_pool', f_pozo), (0, 0, 0), (1.0, 0.62, 0.32), 0.9)
+mat_aceite = mat_decal('ext_oil_stain', textura_procedural('tex_oil_stain', f_aceite), (0.012, 0.01, 0.008), rug=0.75)
+mat_papel = mat_decal('ext_paper', textura_procedural('tex_paper', f_papel, 64), (0.85, 0.83, 0.76), rug=0.8)
+
+# --- charcos de luz bajo cada farol (refuerzan la luz real de los focos, que no tiene sombras)
+for i, lmp in enumerate(L['lamps']):
+    quad('light_pool_%d' % i, lmp['x'], -0.094, lmp['z'], 6.4, 6.4, 0, mat_pozo)
+
+# --- charcos de agua: superficie casi espejo, apenas por encima del asfalto, con borde irregular
+agua = mat_plano('ext_puddle', (0.012, 0.014, 0.018), 0.05, 0.0)
+for i, (cx, cz, ax, az, rot) in enumerate(((-17.5, -9.0, 1.3, 0.75, 20), (-21.2, -12.9, 1.05, 0.6, -15), (-25.4, -6.1, 0.85, 0.5, 40),
+                                          (-14.9, -13.4, 0.95, 0.55, 5), (-19.1, -0.3, 0.6, 0.4, 70), (-23.1, -9.4, 0.55, 0.35, -30))):
+    bm = bmesh.new(); n = 22; vs = []
+    for k in range(n):
+        ang = 2 * math.pi * k / n; rr = 1 + 0.18 * math.sin(ang * 3 + i) + 0.1 * math.sin(ang * 5 + 2 * i)
+        lx, lz = math.cos(ang) * ax * rr, math.sin(ang) * az * rr
+        c, s = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+        vs.append(bm.verts.new(G(cx + lx * c + lz * s, -0.093, cz - lx * s + lz * c)))
+    f = bm.faces.new(vs)
+    if f.normal.z < 0:
+        f.normal_flip()
+    me = bpy.data.meshes.new('puddle_%d' % i); bm.to_mesh(me); bm.free()
+    o = bpy.data.objects.new('puddle_%d' % i, me); sc.collection.objects.link(o); o.data.materials.append(agua)
+
+# --- manchas de aceite en los espacios de estacionamiento
+for i, (cx, cz, t) in enumerate(((-22.8, -4.3, 1.1), (-17.2, -4.9, 0.9), (-20.0, -2.9, 0.8), (-24.4, -11.0, 1.2), (-16.1, -7.7, 0.7), (-25.3, -3.7, 0.6))):
+    quad('oil_%d' % i, cx, -0.095, cz, t * 1.3, t, rng_d.uniform(0, 180), mat_aceite)
+
+# --- parches de asfalto reparado y calle con textura de asfalto danado
+parche = mat_pbr('ext_asphalt_patch', 'road_damaged', 'road_damaged', (0.42, 0.42, 0.44))
+for i, (cx, cz, w_, l_, rot) in enumerate(((-18.6, -12.4, 2.5, 1.4, 7), (-25.0, -2.6, 1.7, 1.2, -4), (-14.9, -9.8, 1.2, 2.1, 0), (-22.5, -15.0, 1.6, 0.9, 12))):
+    quad('asphalt_patch_%d' % i, cx, -0.0965, cz, w_, l_, rot, parche, 2.5)
+calle = mat_pbr('ext_road_damaged', 'road_damaged', 'road_damaged', (0.36, 0.36, 0.38))
+for o in bpy.data.objects:
+    if o.name == 'ext_ground_out_s':
+        o.data.materials[0] = calle
+
+# --- rejillas de desague y topes de estacionamiento
+rejilla = mat_pbr('ext_drain_grate', 'metal_grate_rusty', 'metal_grate_rusty', (0.7, 0.7, 0.7))
+for i, (cx, cz, rot) in enumerate(((-19.6, -14.7, 0), (-14.35, -0.8, 90), (-14.35, -10.5, 90))):
+    quad('drain_%d' % i, cx, -0.092, cz, 0.7, 0.42, rot, rejilla, 0.7)
+hormigon = mat_pbr('ext_concrete_block', 'concrete_pavement', 'concrete_pavement', (0.55, 0.55, 0.55))
+for cx in (-22.8, -17.2):
+    caja('wheel_stop_%d' % int(-cx * 10), (cx - 0.8, -0.10, -7.05), (cx + 0.8, 0.04, -6.88), hormigon, 0.6)
+# flecha pintada hacia el porton
+bm = bmesh.new()
+pts = [(-0.18, 1.2), (0.18, 1.2), (0.18, 0.0), (0.45, 0.0), (0.0, -0.75), (-0.45, 0.0), (-0.18, 0.0)]
+vs = [bm.verts.new(G(-21.0 + px, -0.094, -12.6 + pz)) for px, pz in pts]
+f = bm.faces.new(vs)
+if f.normal.z < 0:
+    f.normal_flip()
+me = bpy.data.meshes.new('painted_arrow'); bm.to_mesh(me); bm.free()
+o = bpy.data.objects.new('painted_arrow', me); sc.collection.objects.link(o); o.data.materials.append(pintura)
+
+# --- contenedor de basura (geometria propia): cuerpo verde, tapas de plastico negro (una entreabierta), ruedas
+verde = mat_plano('ext_dumpster_paint', (0.07, 0.16, 0.08), 0.55, 0.35)
+negro = mat_plano('ext_dumpster_lid', (0.02, 0.02, 0.02), 0.7)
+d = L['dumpster']
+DX, DZ = d['x'], d['z']
+caja('dumpster_body', (DX - 0.95, 0.02, DZ - 0.55), (DX + 0.95, 1.22, DZ + 0.55), verde, 1.0)
+caja('dumpster_rim', (DX - 1.0, 1.18, DZ - 0.6), (DX + 1.0, 1.26, DZ + 0.6), verde)
+caja('dumpster_lid_a', (DX - 0.98, 1.26, DZ - 0.6), (DX - 0.02, 1.31, DZ + 0.6), negro)
+tapa = caja('dumpster_lid_b', (DX + 0.02, 1.26, DZ - 0.6), (DX + 0.98, 1.31, DZ + 0.6), negro)
+tapa.rotation_euler.y = math.radians(14)   # entreabierta
+for sx in (-0.8, 0.8):
+    for sz in (-0.42, 0.42):
+        caja('dumpster_wheel', (DX + sx - 0.06, -0.10, DZ + sz - 0.06), (DX + sx + 0.06, 0.04, DZ + sz + 0.06), negro)
+quad('dumpster_shadow', DX, -0.093, DZ, 2.8, 1.9, 0, mat_sombra)
+for k, (ox, oz, yy) in enumerate(((1.3, 0.3, 30), (1.1, -0.4, 120), (-1.35, 0.1, 75))):
+    colocar('trashbag', DX + ox, -0.10, DZ + oz, yy)
+
+# --- papeles y cartones sueltos
+for k in range(14):
+    px = rng_d.uniform(L['lotMinX'] + 1, L['wallX'] - 1.8); pz = rng_d.uniform(L['lotMinZ'] + 0.6, L['lotMaxZ'] - 0.6)
+    if abs(px - L['carX']) < 1.4 and abs(pz - L['carZ']) < 2.8:
+        continue
+    quad('paper_%d' % k, px, -0.091, pz, 0.21, 0.28, rng_d.uniform(0, 360), mat_papel)
+carton = mat_plano('ext_cardboard_flat', (0.32, 0.22, 0.12), 0.9)
+for k, (cx, cz, rot) in enumerate(((-15.4, -13.6, 25), (-26.0, -14.6, -40))):
+    o = caja('cardboard_flat_%d' % k, (cx - 0.4, -0.098, cz - 0.3), (cx + 0.4, -0.088, cz + 0.3), carton)
+
+# --- cajas junto a la puerta de carga
+colocar('wooden_crate_02', -13.55, 0.0, -2.75, 80)
+colocar('plastic_crate_01', -13.15, 0.0, -4.35, 10)
+colocar('plastic_crate_01', -13.15, 0.26, -4.35, 25)
+
+# --- puerta de carga con cierre metalico enrollable y su letrero (fachada oeste)
+cortina = mat_pbr('ext_shutter', 'painted_metal_shutter', 'painted_metal_shutter', (0.55, 0.57, 0.6))
+sz0, sz1 = -3.95, -2.35
+caja('shutter_frame_s', (xf - 0.12, 0.0, sz0 - 0.1), (xf, 2.45, sz0), metal_marco)
+caja('shutter_frame_n', (xf - 0.12, 0.0, sz1), (xf, 2.45, sz1 + 0.1), metal_marco)
+caja('shutter_box', (xf - 0.22, 2.3, sz0 - 0.1), (xf, 2.62, sz1 + 0.1), metal_marco)
+cierre = caja('shutter_door', (xf - 0.07, 0.0, sz0), (xf - 0.02, 2.3, sz1), cortina)
+uv_mundo(cierre, 1.1)
+amarillo_sign = mat_plano('ext_sign_yellow', (0.75, 0.6, 0.08), 0.6)
+caja('delivery_sign', (xf - 0.03, 2.72, -3.55), (xf - 0.01, 3.02, -2.75), amarillo_sign)
+texto('delivery_text', 'DELIVERIES', 0.14, mat_plano('ext_sign_black', (0.02, 0.02, 0.02), 0.6), G(xf - 0.035, 2.87, -3.15), math.radians(-90), 0.005)
+
+# --- ventanas altas con barrotes y vidrio oscuro
+vidrio = mat_plano('ext_window_glass', (0.01, 0.012, 0.016), 0.08, 0.2)
+for k, (wx, wz) in enumerate(((xf - 0.01, -7.1), (L['northFaceX'] - 0.07, 0.25))):
+    caja('window_frame_%d' % k, (wx - 0.06, 1.85, wz - 0.48), (wx, 2.45, wz + 0.48), metal_marco)
+    caja('window_glass_%d' % k, (wx - 0.065, 1.9, wz - 0.42), (wx - 0.055, 2.4, wz + 0.42), vidrio)
+    for b in range(5):
+        bz = wz - 0.36 + b * 0.18
+        caja('window_bar_%d_%d' % (k, b), (wx - 0.1, 1.88, bz - 0.012), (wx - 0.07, 2.42, bz + 0.012), poste)
+
+# --- tuberias y bajantes en la fachada, rejillas de ventilacion y respiraderos en el techo
+def tubo(nombre, a, b, radio, mat):
+    pa, pb = G(*a), G(*b)
+    largo = (pb - pa).length
+    bpy.ops.mesh.primitive_cylinder_add(radius=radio, depth=largo, vertices=10, location=(pa + pb) / 2)
+    o = bpy.context.object; o.name = nombre
+    o.rotation_euler = (pb - pa).to_track_quat('Z', 'Y').to_euler()
+    o.data.materials.append(mat)
+    return o
+
+
+gris_tubo = mat_plano('ext_pipe', (0.28, 0.28, 0.29), 0.45, 0.7)
+tubo('downpipe_sw', (xf - 0.08, -0.05, -7.92), (xf - 0.08, 3.25, -7.92), 0.055, gris_tubo)
+tubo('downpipe_n', (L['northFaceX'] - 0.08, -0.05, 0.85), (L['northFaceX'] - 0.08, 3.25, 0.85), 0.055, gris_tubo)
+tubo('conduit_w', (xf - 0.05, 2.78, -7.7), (xf - 0.05, 2.78, -2.25), 0.028, gris_tubo)
+for k in range(6):
+    zc = -7.5 + k * 1.05
+    caja('conduit_bracket_%d' % k, (xf - 0.09, 2.74, zc - 0.02), (xf, 2.82, zc + 0.02), metal_marco)
+for k, (vx, vz) in enumerate(((-11.4, -6.4), (-10.6, -3.4), (-11.2, -0.6))):
+    caja('roof_vent_%d' % k, (vx - 0.35, 2.95, vz - 0.35), (vx + 0.35, 3.75, vz + 0.35), gris_tubo)
+    caja('roof_vent_cap_%d' % k, (vx - 0.45, 3.75, vz - 0.45), (vx + 0.45, 3.82, vz + 0.45), metal_marco)
+caja('wall_vent', (xf - 0.04, 0.35, -6.6), (xf - 0.01, 0.75, -6.1), rejilla)
+
+# --- poste de luz electrica fuera de la valla y cableado contra el cielo
+madera = mat_plano('ext_wood_pole', (0.16, 0.11, 0.07), 0.85)
+PX, PZ = L['lotMinX'] - 1.7, -6.0
+tubo('utility_pole', (PX, -0.11, PZ), (PX, 7.4, PZ), 0.14, madera)
+caja('utility_pole_arm', (PX - 0.08, 6.8, PZ - 1.1), (PX + 0.08, 6.95, PZ + 1.1), madera)
+for dz in (-0.95, 0.95):
+    caja('insulator_%d' % int(dz * 10), (PX - 0.05, 6.95, PZ + dz - 0.04), (PX + 0.05, 7.1, PZ + dz + 0.04), vidrio)
+cable_mat = mat_plano('ext_cable', (0.01, 0.01, 0.01), 0.6)
+
+
+def cable(nombre, a, b, caida):
+    cu = bpy.data.curves.new(nombre, 'CURVE'); cu.dimensions = '3D'; cu.bevel_depth = 0.012; cu.bevel_resolution = 1
+    sp = cu.splines.new('POLY'); n = 16; sp.points.add(n - 1)
+    pa, pb = G(*a), G(*b)
+    for k in range(n):
+        u = k / (n - 1); p = pa.lerp(pb, u); p.z -= caida * 4 * u * (1 - u)
+        sp.points[k].co = (p.x, p.y, p.z, 1)
+    o = bpy.data.objects.new(nombre, cu); sc.collection.objects.link(o); o.data.materials.append(cable_mat)
+    bpy.context.view_layer.objects.active = o; o.select_set(True); bpy.ops.object.convert(target='MESH'); o.select_set(False)
+
+
+cable('cable_to_building', (PX, 6.9, PZ - 0.95), (xf - 0.1, 3.2, -7.85), 0.9)
+cable('cable_north', (PX, 6.9, PZ + 0.95), (PX, 6.9, PZ + 26), 1.4)
+cable('cable_south', (PX, 6.9, PZ - 0.95), (PX, 6.9, PZ - 26), 1.4)
+cable('cable_north_b', (PX, 7.05, PZ + 0.95), (PX, 7.05, PZ + 26), 1.2)
+
+# --- letrero de estacionamiento para empleados
+caja('parking_sign_post', (-25.62, -0.10, -0.92), (-25.56, 2.05, -0.86), poste)
+caja('parking_sign_plate', (-25.9, 1.55, -0.86), (-25.28, 2.1, -0.84), mat_plano('ext_sign_white', (0.75, 0.75, 0.72), 0.5))
+texto('parking_sign_text1', 'EMPLOYEE', 0.1, mat_plano('ext_sign_red_text', (0.5, 0.03, 0.02), 0.6), G(-25.59, 1.92, -0.835), math.radians(0), 0.004)
+texto('parking_sign_text2', 'PARKING', 0.1, mat_plano('ext_sign_red_text2', (0.5, 0.03, 0.02), 0.6), G(-25.59, 1.74, -0.835), math.radians(0), 0.004)
+
+# --- vegetacion: arbustos y maleza en la base de la valla y en grietas del asfalto
+for k, (vx, vz, yy, var) in enumerate(((-26.55, -3.0, 20, 'shrub_03_a'), (-26.6, -9.6, 80, 'shrub_03_b'), (-26.5, 0.55, 150, 'shrub_03_c'),
+                                       (-13.05, -15.55, 0, 'shrub_03_a'), (-14.4, 0.55, 260, 'shrub_03_b'), (-12.95, -9.4, 40, 'shrub_03_c'))):
+    colocar('shrub_03', vx, -0.10, vz, yy, 1.3, solo=[var], centrar_xy=True)
+for k, (vx, vz, yy, var) in enumerate(((-14.35, -2.7, 0, 'weed_plant_02_a_LOD0'), (-14.3, -7.65, 90, 'weed_plant_02_b_LOD0'), (-19.2, -15.75, 30, 'weed_plant_02_c_LOD0'),
+                                       (-26.75, -13.8, 200, 'weed_plant_02_a_LOD0'), (-22.95, -7.25, 120, 'weed_plant_02_b_LOD0'), (-16.9, -1.65, 60, 'weed_plant_02_c_LOD0'))):
+    colocar('weed_plant_02', vx, -0.10, vz, yy, 1.0, solo=[var], centrar_xy=True)
+for vx, vz, var in ((-12.92, -8.25, 'nettle_plant_medium_a_LOD0'), (-26.7, -6.3, 'nettle_plant_medium_b_LOD0'), (-24.0, -15.8, 'nettle_plant_small_a_LOD0')):
+    colocar('nettle_plant', vx, -0.10, vz, rng_d.uniform(0, 360), 1.0, solo=[var], centrar_xy=True)
+colocar('dead_tree_trunk_02', L['lotMinX'] - 3.0, -0.11, -10.5, 30)
+
+# --- sombras de contacto bajo lo que toca el suelo (alternativa barata a sombras de los faroles)
+for p in L['props']:
+    tam = {'covered_car': (2.1, 4.7), 'metal_trash_can': (2.1, 0.8), 'utility_box_01': (0.8, 0.7), 'concrete_road_barrier_02': (1.9, 0.7)}.get(p['model'])
+    if tam:
+        quad('shadow_' + p['model'], p['x'], -0.0935, p['z'], tam[0], tam[1], p['yaw'], mat_sombra)
+for i, lmp in enumerate(L['lamps']):
+    quad('shadow_lamp_%d' % i, lmp['x'], -0.0935, lmp['z'], 1.0, 1.0, 0, mat_sombra)
+
 # ---------------------------------------------------------------- exportar
 for o in bpy.data.objects:
     if o.type == 'LIGHT':

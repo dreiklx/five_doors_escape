@@ -45,5 +45,9 @@
     "defeatWitnessBX": -0.4,
     "defeatWitnessBZ": -2.7,
     "defeatStageX": 0.0,
-    "defeatStageZ": -8.1
+    "defeatStageZ": -8.1,
+    "removeNodes": ["MesaPartAndService_35"],
+    "hingedDoors": ["puerta.001_42", "puerta.002_43", "puerta.003_44", "puerta.004_45", "puerta.005_46"],
+    "slidingDoors": ["puerta Izquierda_56", "puerta Derecha_57"],
+    "curtainNode": "CORTINA_37"
 }

@@ -104,6 +104,7 @@ public class SalidaExterior implements Disposable {
     private SpotLightEx faroDerecho;
     private Material materialFaros;
     private Material materialTraseras;
+    private Material materialIndicadores;
     private float tiempo = 0f;
     private boolean exteriorActivo = false;
 
@@ -272,6 +273,9 @@ public class SalidaExterior implements Disposable {
         for (ExteriorDefinition.Lamp farol : def.lamps) {
             mundo.addStaticCollider(caja(farol.x - 0.22f, 0f, farol.z - 0.22f, farol.x + 0.22f, 3.8f, farol.z + 0.22f));
         }
+        for (float[] c : def.extraColliders) {
+            mundo.addStaticCollider(cajaGirada(c[0], c[1], c[2], c[3], 0f, 1.4f));
+        }
         for (ExteriorDefinition.Prop prop : def.props) {
             if (prop.collider != null) {
                 mundo.addStaticCollider(cajaGirada(prop.x, prop.z, prop.collider[0], prop.collider[1], prop.yaw, 1.4f));
@@ -345,6 +349,7 @@ public class SalidaExterior implements Disposable {
         }
         materialFaros = escenaAuto.modelInstance.getMaterial("car_headlight");
         materialTraseras = escenaAuto.modelInstance.getMaterial("car_taillight");
+        materialIndicadores = escenaAuto.modelInstance.getMaterial("car_gauges");
         for (Material m : escenaAuto.modelInstance.materials) {
             m.set(IntAttribute.createCullFace(0));
         }
@@ -359,7 +364,7 @@ public class SalidaExterior implements Disposable {
             luz.setColor(1f, 0.71f, 0.40f, 1f);
             luz.position.set(farol.x, farol.height - 0.15f, farol.z);
             luz.direction.set(0f, -1f, 0f);
-            luz.setConeDeg(64f, 28f);
+            luz.setConeDeg(72f, 34f);
             luz.range = 12f;
             luz.intensity = 0f;
             faroles.add(luz);
@@ -478,6 +483,8 @@ public class SalidaExterior implements Disposable {
         sceneManager.environment.set(FogAttribute.createFog(7f, 46f, 1.4f));
         sceneManager.environment.set(ColorAttribute.createFog(new Color(0.035f, 0.04f, 0.06f, 1f)));
         if (luzDireccional != null) {
+            // afuera la luna pesa mas: sus sombras (las unicas reales del exterior) tienen que leerse
+            luzDireccional.intensity = 1.7f;
             luzDireccional.setCenter((def.lotMinX + def.wallX) / 2f, 0f, (def.lotMinZ + def.lotMaxZ) / 2f);
         }
         // Las paredes limite del oeste y del sur pasaban por dentro del estacionamiento: la del oeste se retira y la
@@ -493,6 +500,14 @@ public class SalidaExterior implements Disposable {
 
     public boolean isExteriorActivo() {
         return exteriorActivo;
+    }
+
+    public Scene getEscenaExterior() {
+        return escenaExterior;
+    }
+
+    public Scene getEscenaAuto() {
+        return escenaAuto;
     }
 
     public SceneSkybox getSkyboxNocturno() {
@@ -517,8 +532,10 @@ public class SalidaExterior implements Disposable {
                     float g = MathUtils.lerp(0.058f, 0.011f, t);
                     float b = MathUtils.lerp(0.085f, 0.026f, t);
                     float dl = dir.dot(luna);
-                    if (dl > 0.9990f) {
-                        r = 0.78f; g = 0.80f; b = 0.86f;
+                    if (dl > 0.9985f) {
+                        // disco con borde suave (antes era un umbral duro: se veia pixelado)
+                        float k = MathUtils.clamp((dl - 0.9985f) / 0.0006f, 0f, 1f);
+                        r = MathUtils.lerp(r + 0.2f, 0.78f, k); g = MathUtils.lerp(g + 0.2f, 0.80f, k); b = MathUtils.lerp(b + 0.22f, 0.86f, k);
                     } else if (dl > 0.98f) {
                         float halo = (dl - 0.98f) / 0.019f;
                         halo = halo * halo * 0.22f;
@@ -677,6 +694,11 @@ public class SalidaExterior implements Disposable {
         }
         if (materialTraseras != null) {
             materialTraseras.set(new ColorAttribute(ColorAttribute.Emissive, encendidos ? 0.9f : 0f, encendidos ? 0.04f : 0f, encendidos ? 0.03f : 0f, 1f));
+        }
+        if (materialIndicadores != null) {
+            // el tablero se ilumina con el motor: multiplica la textura emisiva de las esferas (verde palido, como los
+            // indicadores de un sedan viejo); apagado = 0
+            materialIndicadores.set(new ColorAttribute(ColorAttribute.Emissive, encendidos ? 0.8f : 0f, encendidos ? 0.8f : 0f, encendidos ? 0.8f : 0f, 1f));
         }
         actualizarFaros();
     }

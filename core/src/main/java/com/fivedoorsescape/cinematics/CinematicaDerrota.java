@@ -38,7 +38,8 @@ import net.mgsx.gltf.scene3d.scene.SceneManager;
  *  10.6-11.3 el foco revienta: oscuridad, solo los ojos del culpable; el latido se detiene
  *  11.3-12.3 negro -> NightGameOverScreen de siempre
  *
- * ESC o ENTER la saltan desde el primer segundo (no E: es la tecla de juego y podia estar apretada al morir).
+ * Se omite manteniendo ESC ~1.2 s (OmitirCinematica, CLAUDE.md §2.51); un toque no hace nada, asi que tampoco
+ * se salta sin querer si el jugador tenia ESC apretado al morir.
  */
 public class CinematicaDerrota {
 
@@ -51,7 +52,6 @@ public class CinematicaDerrota {
     public static final String[] SONIDOS = {SONIDO_ARRASTRE, SONIDO_GOLPE, SONIDO_SERVO, SONIDO_FOCO};
 
     public static final float DURACION = 12.3f;
-    private static final float SALTO_PERMITIDO_DESDE = 1.0f;
     private static final float T_ARRASTRE = 1.0f;
     private static final float T_FIN_ARRASTRE = 5.3f;
     private static final float T_ESCENARIO = 6.0f;
@@ -74,7 +74,7 @@ public class CinematicaDerrota {
     private final SpotLightEx linterna;
     private final AssetService assets;
     private final ControlMusica musica;
-    private final String textoSaltar;
+    private final OmitirCinematica omision;
 
     private SpotLightEx foco;
     private PointLightEx ojos;
@@ -100,7 +100,7 @@ public class CinematicaDerrota {
         this.linterna = linterna;
         this.assets = assets;
         this.musica = musica;
-        this.textoSaltar = textoSaltar;
+        this.omision = new OmitirCinematica(textoSaltar);
     }
 
     public void iniciar() {
@@ -152,7 +152,7 @@ public class CinematicaDerrota {
             return true;
         }
         t += dt;
-        if (t >= SALTO_PERMITIDO_DESDE && (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER))) {
+        if (omision.actualizar(dt)) {
             terminar();
             return true;
         }
@@ -283,19 +283,10 @@ public class CinematicaDerrota {
         shapes.rect(0, h - h * 0.08f - parpado, w, h * 0.08f);
         shapes.rect(0, parpado, w, h * 0.08f);
         shapes.end();
-        if (t > SALTO_PERMITIDO_DESDE && t < T_NEGRO_FINAL) {
-            batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
-            batch.begin();
-            float escala = fuente.getScaleX();
-            fuente.getData().setScale(0.85f);
-            GlyphLayout layout = new GlyphLayout(fuente, textoSaltar);
-            fuente.setColor(1f, 1f, 1f, 0.4f);
-            fuente.draw(batch, layout, w - layout.width - 24f, 30f);
-            fuente.setColor(Color.WHITE);
-            fuente.getData().setScale(escala);
-            batch.end();
-        }
         Gdx.gl.glDisable(GL20.GL_BLEND);
+        if (t < T_NEGRO_FINAL) {
+            omision.dibujar(batch, shapes, fuente, 0f);
+        }
     }
 
     public float getTiempo() {
