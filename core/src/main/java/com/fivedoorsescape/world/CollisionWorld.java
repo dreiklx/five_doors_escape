@@ -112,6 +112,77 @@ public class CollisionWorld {
         return result;
     }
 
+    /**
+     * Movimiento del jugador cerca del escalon del escenario (CLAUDE.md §2.65). Igual que resolveMovement(..., true),
+     * pero en cada eje la caja probada cubre en vertical desde la altura actual hasta la altura de reposo en el destino
+     * (baseY + alturaEscalonEn). La altura cambia de forma gradual (VELOCIDAD_ESCALON) despues de resolver el
+     * movimiento horizontal. Antes, al bajar del escenario corriendo, la caja seguia elevada 0.56 m durante ~0.28 s y
+     * pasaba por encima del borde de una mesa del comedor; al terminar de bajar quedaba dentro del tablero y ningun
+     * eje volvia a quedar libre: el jugador se quedaba atrapado. Lejos del escalon (altura actual == altura de reposo)
+     * es exactamente resolveMovement.
+     */
+    public Vector3 resolveMovementConEscalon(Vector3 position, Vector3 delta, Vector3 halfExtents, float baseY,
+            Array<BoundingBox> yaSolapados) {
+        Vector3 result = new Vector3(position);
+        result.x += delta.x;
+        if (overlapsBarrido(result, halfExtents, baseY, yaSolapados)) {
+            result.x = position.x;
+        }
+        result.z += delta.z;
+        if (overlapsBarrido(result, halfExtents, baseY, yaSolapados)) {
+            result.z = position.z;
+        }
+        return result;
+    }
+
+    /**
+     * Red de seguridad para resolveMovementConEscalon: llena "salida" con los colliders que la caja (con el mismo
+     * barrido vertical) ya toca en "position". Esos se ignoran en ese movimiento: si el jugador estuviera dentro de
+     * algo (un collider que aparece encima, una reaparicion en mal sitio) puede moverse mientras no entre en ningun
+     * collider NUEVO, y asi sale. Sin esto ningun eje volveria a quedar libre. Normalmente queda vacia.
+     */
+    public void collidersYaSolapados(Vector3 position, Vector3 halfExtents, float baseY, Array<BoundingBox> salida) {
+        salida.clear();
+        cajaBarrido(position, halfExtents, baseY);
+        for (BoundingBox c : staticColliders) {
+            if (c.intersects(tmpEntityBox)) {
+                salida.add(c);
+            }
+        }
+        for (BoundingBox c : collidersSoloJugador) {
+            if (c.intersects(tmpEntityBox)) {
+                salida.add(c);
+            }
+        }
+    }
+
+    private final Vector3 tmpCentroBarrido = new Vector3();
+    private final Vector3 tmpSemiBarrido = new Vector3();
+
+    private void cajaBarrido(Vector3 center, Vector3 halfExtents, float baseY) {
+        float reposo = baseY + alturaEscalonEn(center.x, center.z);
+        float bajo = Math.min(center.y, reposo);
+        float alto = Math.max(center.y, reposo);
+        tmpCentroBarrido.set(center.x, (bajo + alto) * 0.5f, center.z);
+        tmpSemiBarrido.set(halfExtents.x, halfExtents.y + (alto - bajo) * 0.5f, halfExtents.z);
+        tmpEntityBox.set(new Vector3(tmpCentroBarrido).sub(tmpSemiBarrido), new Vector3(tmpCentroBarrido).add(tmpSemiBarrido));
+    }
+
+    private boolean overlapsBarrido(Vector3 center, Vector3 halfExtents, float baseY, Array<BoundingBox> ignorar) {
+        cajaBarrido(center, halfExtents, baseY);
+        for (BoundingBox c : staticColliders) {
+            if (c.intersects(tmpEntityBox) && !ignorar.contains(c, true)) {
+                return true;
+            }
+        }
+        for (BoundingBox c : collidersSoloJugador) {
+            if (c.intersects(tmpEntityBox) && !ignorar.contains(c, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** True si una caja centrada en position, con esas semi-extensiones, se solapa con algun collider estatico. */
     public boolean overlapsStatic(Vector3 center, Vector3 halfExtents) {
         return overlaps(center, halfExtents, false);

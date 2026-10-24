@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import com.fivedoorsescape.assets.AssetService;
 import com.fivedoorsescape.content.ExteriorDefinition;
+import com.fivedoorsescape.world.FreddyExterior;
 import com.fivedoorsescape.world.SalidaExterior;
 
 /**
@@ -25,9 +26,14 @@ import com.fivedoorsescape.world.SalidaExterior;
  *  1.3-2.9   entra y se sienta (la mirada pasa de la puerta al parabrisas)
  *  2.9-3.6   cierra la puerta: el ambiente nocturno queda amortiguado
  *  3.6-5.0   respiracion, llave, burro de arranque; el motor prende y se encienden los faros
- *  5.0-7.4   gira la cabeza hacia la pizzeria: Freddy esta parado en la puerta de emergencia, mirando
- *  7.4-11.4  arranca: sale del espacio, se levanta la barrera, cruza el porton y dobla hacia la calle
- * 11.4-16.5  corte a una camara fija en la calle: el auto pasa y se aleja; quedan el letrero y la pizzeria; negro
+ *  5.0-7.4   gira la cabeza hacia la pizzeria: Freddy esta parado en la puerta de emergencia, mirando. A los 6.15 s
+ *            su cabeza se clava en el auto, se rie, y a los 6.55 s sale corriendo hacia el (CLAUDE.md §2.68); la camara
+ *            lo sigue hasta que el jugador vuelve la vista al frente y arranca
+ *  7.4-11.4  arranca con Freddy corriendo detras: sale del espacio, se levanta la barrera; a los 9 s el jugador mira
+ *            por encima del hombro y lo ve por la luneta, a pocos metros, rojo por las luces traseras; cruza el porton
+ *            y dobla hacia la calle. Freddy no puede alcanzarlo y se planta en el porton
+ * 11.4-16.5  corte a una camara fija en la calle: el auto pasa y se aleja; Freddy queda inmovil en el porton abierto,
+ *            bajo el farol, mirando; quedan el letrero y la pizzeria; negro
  *
  * Se omite manteniendo ESC ~1.2 s (OmitirCinematica, CLAUDE.md §2.51). El auto se mueve por una trayectoria fija calculada a partir de
  * exterior.json (recta, curva de radio 5.5 m que pasa por el porton y recta por la calle) y sus ruedas giran segun la
@@ -46,7 +52,7 @@ public class CinematicaVictoria {
     /** Todo lo que BootScreen debe cargar para esta secuencia (incluidos los de la apertura de puertas). */
     public static final String[] SONIDOS = {SalidaExterior.SONIDO_AMBIENTE_NOCHE, SalidaExterior.SONIDO_PUERTA_SALIDA,
             SalidaExterior.SONIDO_PUERTA_EMERGENCIA, SONIDO_PUERTA_ABRE, SONIDO_PUERTA_CIERRA, SONIDO_ARRANQUE,
-            SONIDO_MARCHA, SONIDO_BARRERA};
+            SONIDO_MARCHA, SONIDO_BARRERA, FreddyExterior.SONIDO_PASO, CinematicaDerrota.SONIDO_SERVO};
 
     public static final float DURACION = 16.5f;
     private static final float T_SENTADO = 2.9f;
@@ -56,6 +62,12 @@ public class CinematicaVictoria {
     private static final float T_ARRANCA = 7.4f;
     private static final float T_CORTE_CALLE = 11.4f;
     private static final float T_FUNDIDO = 15.3f;
+    // persecucion de Freddy (§2.68)
+    private static final float T_FREDDY_MIRA_AUTO = 6.15f;
+    private static final float T_FREDDY_CORRE = 6.55f;
+    private static final float T_VUELTA = T_ARRANCA - 0.35f;
+    private static final float T_MIRA_ATRAS = 8.95f;
+    private static final float DUR_MIRA_ATRAS = 1.0f;
 
     /** Volumen del ambiente nocturno, que maneja GameplayScreen (el loop sigue vivo durante toda la secuencia). */
     public interface ControlAmbiente {
@@ -67,7 +79,7 @@ public class CinematicaVictoria {
     private final ExteriorDefinition def;
     private final AssetService assets;
     private final ControlAmbiente ambiente;
-    private final Runnable colocarFreddyEnPuerta;
+    private final FreddyExterior freddy;
     private final OmitirCinematica omision;
 
     private float t = 0f;
@@ -104,13 +116,13 @@ public class CinematicaVictoria {
     private final Vector3 miraCalle = new Vector3();
 
     public CinematicaVictoria(PerspectiveCamera camera, SalidaExterior salida, AssetService assets, ControlAmbiente ambiente,
-            Runnable colocarFreddyEnPuerta, String textoSaltar) {
+            FreddyExterior freddy, String textoSaltar) {
         this.camera = camera;
         this.salida = salida;
         this.def = salida.getDefinicion();
         this.assets = assets;
         this.ambiente = ambiente;
-        this.colocarFreddyEnPuerta = colocarFreddyEnPuerta;
+        this.freddy = freddy;
         this.omision = new OmitirCinematica(textoSaltar);
         construirRuta();
     }
@@ -176,6 +188,7 @@ public class CinematicaVictoria {
         }
         eventos();
         moverAuto(dt);
+        moverFreddy(dt);
         moverCamara();
         if (t >= DURACION) {
             terminar();
@@ -196,8 +209,9 @@ public class CinematicaVictoria {
         if (una(0, 0.35f)) {
             assets.getSound(SONIDO_PUERTA_ABRE).play(0.9f);
         }
-        if (una(1, 2.6f)) {
-            colocarFreddyEnPuerta.run();
+        if (una(1, 2.6f) && freddy != null) {
+            // mientras el jugador entra al auto (mirando adentro): nunca aparece a la vista
+            freddy.colocarEnPuerta();
         }
         if (una(2, 3.15f)) {
             assets.getSound(SONIDO_PUERTA_CIERRA).play(1f);
@@ -271,6 +285,34 @@ public class CinematicaVictoria {
         }
     }
 
+    private final Vector3 objetivoFreddy = new Vector3();
+    private final Vector3 cabezaFreddy = new Vector3();
+
+    /** Freddy: mira al auto, sale corriendo y lo persigue hasta el porton (§2.68). */
+    private void moverFreddy(float dt) {
+        if (freddy == null) {
+            return;
+        }
+        if (freddy.estaEnPuerta()) {
+            if (t >= T_FREDDY_MIRA_AUTO) {
+                salida.puntoAuto(def.carDriverEyeLocal[0], def.carDriverEyeLocal[1], def.carDriverEyeLocal[2], objetivoFreddy);
+                freddy.mirarDesdePuerta(objetivoFreddy);
+            }
+            if (t >= T_FREDDY_CORRE) {
+                freddy.iniciarPersecucion();
+            }
+            return;
+        }
+        // antes de que arranque, corre hacia la puerta del conductor; despues, a un punto 3.5 m detras del auto
+        // (nunca se le echa encima: al llegar a ese punto solo lo sigue)
+        if (t < T_ARRANCA) {
+            salida.puntoAuto(2.2f, 0f, 0.2f, objetivoFreddy);
+        } else {
+            salida.puntoAuto(0f, 0f, -3.5f, objetivoFreddy);
+        }
+        freddy.actualizarPersecucion(dt, objetivoFreddy, camera.position);
+    }
+
     private void moverCamara() {
         float[] ej = def.carDriverEyeLocal;
         if (t < 1.3f) {
@@ -305,25 +347,46 @@ public class CinematicaVictoria {
             }
             salida.puntoAuto(ej[0], ej[1] - 0.06f, 8f, mira);
             if (t >= T_MIRA_FREDDY && t < T_ARRANCA) {
-                // gira la cabeza hacia la pizzeria (lado del acompanante) y la sostiene en Freddy
+                // gira la cabeza hacia la pizzeria (lado del acompanante) y la sostiene en Freddy; cuando el sale
+                // corriendo la mirada lo sigue, y vuelve al frente de golpe (0.35 s) justo antes de arrancar
                 float ida = suave((t - T_MIRA_FREDDY) / 0.9f);
-                float vuelta = suave((t - (T_ARRANCA - 0.55f)) / 0.5f);
+                float vuelta = suave((t - T_VUELTA) / 0.35f);
                 float w = ida * (1f - vuelta);
-                tmp.set(def.freddyDoorX, 1.75f, def.freddyDoorZ);
+                if (freddy != null) {
+                    freddy.posicionCabeza(tmp);
+                } else {
+                    tmp.set(def.freddyDoorX, 1.75f, def.freddyDoorZ);
+                }
                 mira.lerp(tmp, w);
             } else if (t >= T_ARRANCA) {
                 // mira hacia donde va: un punto de la ruta unos metros por delante
                 muestrearRuta(distancia + 7f, tmp);
                 tmp.y = 1.0f;
                 mira.lerp(tmp, 0.55f);
+                // Freddy detras: corte breve a una camara pegada al maletero, que va con el auto, mirando hacia atras.
+                // Freddy corre a pocos metros, rojo por las luces traseras. (Primero se probo girar la cabeza del
+                // conductor: desde el asiento se veia sobre todo el techo y Freddy quedaba diminuto en la luneta.)
+                float u = (t - T_MIRA_ATRAS) / DUR_MIRA_ATRAS;
+                if (freddy != null && u > 0f && u < 1f) {
+                    salida.puntoAuto(0.45f, 1.05f, -2.9f, ojo);
+                    ojo.y += 0.02f * MathUtils.sin(t * 37f);
+                    freddy.posicionCabeza(cabezaFreddy);
+                    mira.set(cabezaFreddy);
+                    mira.y -= 0.35f;
+                }
             }
         } else {
             // camara fija en la calle: sigue al auto mientras pasa y despues se queda con la pizzeria
             ojo.set(camCalle);
             salida.puntoAuto(0f, 0.9f, 0f, tmp);
             float u = suave((t - (T_CORTE_CALLE + 2.1f)) / 1.8f);
-            // el letrero de la pizzeria (dos caras, ver build_exterior.py), con el estacionamiento detras
+            // el letrero de la pizzeria (dos caras, ver build_exterior.py) y, debajo, el porton abierto donde quedo
+            // Freddy mirando (§2.68): el encuadre final queda entre los dos
             miraCalle.set(def.lotMinX - 2.2f, 4.2f, def.lotMinZ - 1.4f);
+            if (freddy != null) {
+                freddy.posicionCabeza(tmp2);
+                miraCalle.lerp(tmp2, 0.45f);
+            }
             mira.set(tmp).lerp(miraCalle, u);
             // empuje lento hacia adelante al final
             float empuje = suave((t - (T_CORTE_CALLE + 2.5f)) / 3.5f);

@@ -7,5 +7,10 @@
         "idle": "Freddy_Idle",
         "walk": "Freddy_Walk"
     },
+    "huesos": {
+        "cabeza": "j_head_04",
+        "torso": "j_spine_03",
+        "mandibula": "j_jaw_06"
+    },
     "aiControlled": true
 }

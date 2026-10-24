@@ -3,8 +3,8 @@
     "beamHalfAngleDegrees": 22.0,
     "targetHeight": 1.15,
     "stun": {
-        "foxy":   { "cycles": 5,  "seconds": 1.5 },
-        "bonnie": { "cycles": 10, "seconds": 1.5 },
-        "chica":  { "cycles": 10, "seconds": 1.5 }
+        "foxy":   { "cycles": 3, "seconds": 1.5 },
+        "bonnie": { "cycles": 7, "seconds": 1.5 },
+        "chica":  { "cycles": 7, "seconds": 1.5 }
     }
 }

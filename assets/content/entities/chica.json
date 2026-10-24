@@ -7,5 +7,9 @@
         "idle": "Chica_Idle",
         "walk": "Chica_Walk"
     },
+    "huesos": {
+        "cabeza": "Bone.003_Armature_7",
+        "torso": "Bone.001_Armature_5"
+    },
     "aiControlled": true
 }

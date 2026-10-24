@@ -18,5 +18,9 @@ public class EntityDefinition {
     /** Nombre logico (p.ej. "idle", "walk") -> nombre del clip dentro del glb. Vacio si no aplica. */
     public ObjectMap<String, String> animaciones = new ObjectMap<>();
 
+    /** Huesos para el movimiento procedural de las cinematicas (CLAUDE.md §2.67): "cabeza", "torso" y, si la tiene,
+     * "mandibula" -> nombre del nodo del esqueleto en el glb. Opcional: sin entrada, la entidad solo usa su animacion. */
+    public ObjectMap<String, String> huesos = new ObjectMap<>();
+
     public boolean aiControlled = false;
 }

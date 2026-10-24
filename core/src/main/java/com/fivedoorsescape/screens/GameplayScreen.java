@@ -326,6 +326,8 @@ public class GameplayScreen implements Screen {
     private float volumenAmbienteNoche = 0f;
     private float volumenAmbienteNocheObjetivo = 0f;
     private boolean freddyEnPuertaEmergencia = false;
+    /** Freddy fuera de la pizzeria: presencia fisica en la puerta, amenaza y persecucion final (CLAUDE.md §2.68). */
+    private com.fivedoorsescape.world.FreddyExterior freddyExterior;
 
     // Mundo interactivo (CLAUDE.md §2.56-§2.58).
     private PuertasInteriores puertasInteriores;
@@ -339,6 +341,8 @@ public class GameplayScreen implements Screen {
     private float chispaRestante = 0f;
 
     private boolean pausado = false;
+    /** Se mostro "Haz clic para entrar": al activarse hay que volver a capturar el cursor (§2.71). */
+    private boolean activacionPendiente = false;
     /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
      * desvanecimiento del panel de ayuda inicial, ver dibujarAyudaInicial(). */
     private float tiempoJugandoTranscurrido = 0f;
@@ -1080,17 +1084,21 @@ public class GameplayScreen implements Screen {
 
     private static final float PASO_MAXIMO_MOVIMIENTO = 0.1f;
     private final Vector3 tmpPasoMovimiento = new Vector3();
+    private final Array<BoundingBox> tmpYaSolapados = new Array<>();
 
     /** Resuelve el movimiento del jugador en sub-pasos de como mucho 0.1 m (CLAUDE.md §2.53). resolveMovement prueba
      * solo la posicion de destino: con el sprint (5.8 m/s) y un frame largo (dt tope 0.1 s) el salto llegaba a
-     * 0.58 m, casi el ancho del jugador, y una pared sin grosor podia quedar "entre" origen y destino. */
+     * 0.58 m, casi el ancho del jugador, y una pared sin grosor podia quedar "entre" origen y destino. Cada sub-paso
+     * tiene en cuenta la altura a la que el jugador va a quedar en el destino (escalon del escenario, §2.65). */
     private Vector3 resolverMovimientoEnPasos(Vector3 posicion, Vector3 delta, Vector3 semiExtensiones) {
         float largo = delta.len();
         int pasos = Math.max(1, MathUtils.ceil(largo / PASO_MAXIMO_MOVIMIENTO));
         Vector3 actual = new Vector3(posicion);
         tmpPasoMovimiento.set(delta).scl(1f / pasos);
+        collisionWorld.collidersYaSolapados(actual, semiExtensiones, mapDef.playerStartY, tmpYaSolapados);
         for (int i = 0; i < pasos; i++) {
-            actual.set(collisionWorld.resolveMovement(actual, tmpPasoMovimiento, semiExtensiones, true));
+            actual.set(collisionWorld.resolveMovementConEscalon(actual, tmpPasoMovimiento, semiExtensiones, mapDef.playerStartY,
+                    tmpYaSolapados));
         }
         return actual;
     }
@@ -1555,22 +1563,35 @@ public class GameplayScreen implements Screen {
         detenerLatidos();
         linternaEncendida = false;
         linternaJugador.intensity = 0f;
+        asegurarFreddyExterior();
         cinematicaVictoria = new CinematicaVictoria(camera, salidaExterior, assets, v -> volumenAmbienteNocheObjetivo = v,
-                this::colocarFreddyEnPuertaEmergencia, Lang.get(handoff.idioma, "cinematic.skip"));
+                freddyExterior, Lang.get(handoff.idioma, "cinematic.skip"));
         cinematicaVictoria.iniciar();
         estado = EstadoPartida.VICTORIA_CINEMATICA;
         tiempoEnEstado = 0f;
     }
 
-    /** Freddy queda de pie en la puerta de emergencia, mirando hacia el estacionamiento. */
+    /** Freddy queda de pie en la puerta de emergencia, mirando hacia el estacionamiento, con su collider (§2.68). */
     private void colocarFreddyEnPuertaEmergencia() {
         if (freddyEnPuertaEmergencia || freddyEntity == null) {
             return;
         }
         freddyEnPuertaEmergencia = true;
-        TransformComponent t = Mappers.transform.get(freddyEntity);
-        t.position.set(salidaExterior.getDefinicion().freddyDoorX, 0f, salidaExterior.getDefinicion().freddyDoorZ);
-        t.yawDegrees = -90f;
+        asegurarFreddyExterior();
+        freddyExterior.colocarEnPuerta();
+    }
+
+    private void asegurarFreddyExterior() {
+        if (freddyExterior == null && freddyEntity != null) {
+            com.fivedoorsescape.content.EntityDefinition defFreddy = registry.getEntityDefinition("freddy");
+            com.fivedoorsescape.cinematics.PoseProcedural pose = defFreddy != null && defFreddy.huesos.size > 0
+                    ? new com.fivedoorsescape.cinematics.PoseProcedural(Mappers.model.get(freddyEntity).scene.modelInstance,
+                            defFreddy.huesos)
+                    : null;
+            freddyExterior = new com.fivedoorsescape.world.FreddyExterior(freddyEntity, collisionWorld,
+                    salidaExterior.getDefinicion(), pose, assets.getSound(CinematicaDerrota.SONIDO_SERVO), sonidoRisaFreddy,
+                    assets.getSound(com.fivedoorsescape.world.FreddyExterior.SONIDO_PASO));
+        }
     }
 
     /** Ya afuera, a unos metros de la puerta y mirando hacia otro lado: Freddy aparece en el umbral (su caja musical,
@@ -1602,6 +1623,8 @@ public class GameplayScreen implements Screen {
         if (termino) {
             // Unico registro de la victoria: escapado bloquea cualquier otro final a partir de aqui.
             escapado = true;
+            // Estrella y agradecimiento en FDAF (CLAUDE.md §1.66): una vez por partida, aqui y solo aqui.
+            com.fivedoorsescape.io.VictoriaEscape.marcar();
             cinematicaVictoria.terminar();
             EscapeVictoryScreen victoria = new EscapeVictoryScreen(game, handoff);
             game.setScreen(victoria);
@@ -1613,7 +1636,13 @@ public class GameplayScreen implements Screen {
         engine.update(dt);
         actualizarMusicaEspacialFreddy();
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        if (freddyExterior != null) {
+            freddyExterior.antesDeAnimar();
+        }
         sceneManager.update(dt);
+        if (freddyExterior != null) {
+            freddyExterior.despuesDeAnimar();
+        }
         sceneManager.render();
         cinematicaVictoria.dibujarOverlay(uiBatch, uiShapes, uiFont);
     }
@@ -2013,6 +2042,17 @@ public class GameplayScreen implements Screen {
     public void render(float delta) {
         float dt = Math.min(delta, MAX_FRAME_DELTA);
 
+        // La ventana todavia no tuvo nunca el teclado (Escape la abrio otro proceso, CLAUDE.md §2.71): el mundo
+        // queda detenido con "Haz clic para entrar". El clic da el foco y no llega al juego (este cuadro termina aqui).
+        if (!com.fivedoorsescape.util.EstadoVentana.isEnfocadaAlgunaVez()) {
+            dibujarActivacion();
+            return;
+        }
+        if (activacionPendiente) {
+            activacionPendiente = false;
+            Gdx.input.setCursorCatched(true);
+        }
+
         switch (estado) {
             case CINEMATICA_INICIAL:
                 actualizarCinematicaInicial(dt);
@@ -2046,6 +2086,14 @@ public class GameplayScreen implements Screen {
                 return;
             default:
                 break;
+        }
+
+        // ALT+TAB o un clic fuera: se abre la pausa (mundo y audio detenidos, cursor libre). Al volver sigue en pausa
+        // y se reanuda con ESC, como siempre (§2.71).
+        if (!pausado && !com.fivedoorsescape.util.EstadoVentana.isEnfocada()) {
+            pausado = true;
+            Gdx.input.setCursorCatched(false);
+            pausarAudioContinuo();
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
@@ -2119,10 +2167,19 @@ public class GameplayScreen implements Screen {
         actualizarMundoInteractivo(dt, playerTransform.position);
         salidaExterior.actualizar(dt);
         actualizarFreddyEnPuerta(playerTransform.position);
+        if (freddyExterior != null) {
+            freddyExterior.actualizarJuego(dt, camera.position);
+        }
         actualizarAmbienteNoche(dt);
 
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        if (freddyExterior != null) {
+            freddyExterior.antesDeAnimar();
+        }
         sceneManager.update(dt);
+        if (freddyExterior != null) {
+            freddyExterior.despuesDeAnimar();
+        }
         sceneManager.render();
 
         actualizarLatidosYVineta(playerTransform.position);
@@ -2692,7 +2749,7 @@ public class GameplayScreen implements Screen {
                         sonidoMusicaFreddy.stop(idSonidoMusicaFreddy);
                         idSonidoMusicaFreddy = -1;
                     }
-                }, Lang.get(handoff.idioma, "cinematic.skip"));
+                }, Lang.get(handoff.idioma, "cinematic.skip"), registry);
         cinematicaDerrota.iniciar();
         estado = EstadoPartida.DERROTA_CINEMATICA;
         tiempoEnEstado = 0f;
@@ -2709,7 +2766,10 @@ public class GameplayScreen implements Screen {
         actualizarMusicaEspacialFreddy();
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        // movimiento procedural de cabezas/torsos encima de las animaciones (CLAUDE.md §2.67)
+        cinematicaDerrota.antesDeAnimar();
         sceneManager.update(dt);
+        cinematicaDerrota.despuesDeAnimar();
         sceneManager.render();
         cinematicaDerrota.dibujarOverlay(uiBatch, uiShapes, uiFont);
     }
@@ -3002,6 +3062,45 @@ public class GameplayScreen implements Screen {
     public void resize(int width, int height) {
         sceneManager.updateViewport(width, height);
     }
+
+    /** Pantalla de activacion (§2.71): escena congelada, oscurecida, y el texto centrado. */
+    private void dibujarActivacion() {
+        if (!activacionPendiente) {
+            activacionPendiente = true;
+            Gdx.input.setCursorCatched(false);
+        }
+        if (Gdx.input.justTouched()) {
+            // el clic ya le dio el foco a la ventana; se pide por si acaso y se consume aqui
+            com.fivedoorsescape.util.EstadoVentana.pedirFoco();
+            com.fivedoorsescape.util.EstadoVentana.alCambiarFoco(true);
+        }
+        Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        sceneManager.update(0f);
+        sceneManager.render();
+        int w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
+        uiShapes.setColor(0f, 0f, 0f, 0.72f);
+        uiShapes.rect(0, 0, w, h);
+        uiShapes.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        uiBatch.begin();
+        float escala = uiFont.getData().scaleX;
+        uiFont.getData().setScale(Math.max(1.6f, h / 450f));
+        uiFont.setColor(1f, 1f, 1f, 0.6f + 0.4f * Math.abs(MathUtils.sin(tiempoActivacion * 2.2f)));
+        com.badlogic.gdx.graphics.g2d.GlyphLayout gl = new com.badlogic.gdx.graphics.g2d.GlyphLayout(uiFont,
+                Lang.get(handoff.idioma, "window.click"));
+        uiFont.draw(uiBatch, gl, (w - gl.width) / 2f, h / 2f + gl.height / 2f);
+        uiFont.setColor(Color.WHITE);
+        uiFont.getData().setScale(escala);
+        uiBatch.end();
+        tiempoActivacion += Gdx.graphics.getDeltaTime();
+    }
+
+    private float tiempoActivacion = 0f;
 
     @Override
     public void pause() {

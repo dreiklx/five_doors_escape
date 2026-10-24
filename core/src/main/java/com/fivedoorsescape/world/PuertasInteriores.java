@@ -2,12 +2,17 @@ package com.fivedoorsescape.world;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.audio.Sound;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.FloatArray;
 
 import net.mgsx.gltf.scene3d.scene.Scene;
 
@@ -16,9 +21,9 @@ import net.mgsx.gltf.scene3d.scene.Scene;
  * cerradas a la vista mientras su vano era atravesable: el jugador (y los animatronicos) pasaban "a traves" de la
  * puerta.
  *
- * - Abatibles: giran 88 grados sobre la bisagra. Para cada puerta se mide, contra las colisiones reales, hacia que
- *   lado y con que bisagra el barrido de la hoja queda libre; si los dos lados lo estan, se abre hacia el lado
- *   contrario de quien llega (como una puerta de vaiven).
+ * - Abatibles: giran 88 grados sobre la bisagra, que va en el canto opuesto al picaporte (se lee de la malla, ver
+ *   cantoPicaporte, CLAUDE.md §2.63). Para cada lado se mide contra las colisiones reales si el barrido de la hoja
+ *   queda libre; si los dos lo estan, se abre hacia el lado contrario de quien llega (como una puerta de vaiven).
  * - Corredizas (las puertas de seguridad de la oficina, como en FNAF): suben 1.9 m y vuelven a bajar.
  *
  * Colision: con la puerta cerrada su hoja tiene un collider fino; al empezar a abrirse se retira (la hoja en
@@ -50,6 +55,8 @@ public class PuertasInteriores {
         final Vector3 centro = new Vector3();
         boolean delgadaEnX;
         float ancho;
+        // canto del picaporte en el eje ancho: -1 = extremo minimo, +1 = maximo, 0 = no se reconocio
+        int picaporte;
         // bisagra elegida y signo del giro para cada lado del vano (+1 / -1 en el eje delgado); NaN = lado bloqueado
         final float[] bisagraX = new float[2];
         final float[] bisagraZ = new float[2];
@@ -114,12 +121,14 @@ public class PuertasInteriores {
             p.collider.max.z = p.centro.z + 0.06f;
         }
         if (!corrediza) {
+            p.picaporte = cantoPicaporte(hoja, instancia, p, caja);
             elegirBisagras(p, caja);
         }
         mundo.addStaticCollider(p.collider);
         puertas.add(p);
-        Gdx.app.log("PuertasInteriores", id + (corrediza ? " corrediza" : " abatible, lado - libre=" + p.ladoLibre[0]
-                + ", lado + libre=" + p.ladoLibre[1]));
+        Gdx.app.log("PuertasInteriores", id + (corrediza ? " corrediza" : " abatible, picaporte en " + p.picaporte
+                + ", lado - libre=" + p.ladoLibre[0] + " bisagra (" + p.bisagraX[0] + ", " + p.bisagraZ[0]
+                + "), lado + libre=" + p.ladoLibre[1] + " bisagra (" + p.bisagraX[1] + ", " + p.bisagraZ[1] + ")"));
     }
 
     /** Para cada lado del vano (-/+ en el eje delgado) prueba las dos bisagras y se queda con la que deja el barrido
@@ -131,6 +140,10 @@ public class PuertasInteriores {
             float s = lado == 0 ? -1f : 1f;
             int mejorChoques = Integer.MAX_VALUE;
             for (int extremo = 0; extremo < 2; extremo++) {
+                // la bisagra va en el canto opuesto al picaporte (extremo 0 = minimo, 1 = maximo)
+                if ((p.picaporte < 0 && extremo == 0) || (p.picaporte > 0 && extremo == 1)) {
+                    continue;
+                }
                 float hx, hz, vx, vz;   // bisagra y vector bisagra -> canto libre con la puerta cerrada
                 if (p.delgadaEnX) {
                     hx = p.centro.x;
@@ -170,6 +183,67 @@ public class PuertasInteriores {
         if (!p.ladoLibre[0] && !p.ladoLibre[1]) {
             p.ladoLibre[1] = true;   // nunca dejar una puerta sin poder abrirse: el lado menos malo
         }
+    }
+
+    /**
+     * Canto en el que esta el picaporte, leido de la propia malla de la hoja: los pomos son lo unico que sobresale
+     * de las dos caras de la hoja (la placa mide ~7 cm y los pomos llegan a ~14 cm del centro), a la altura de la
+     * mano. Devuelve -1 si estan cerca del extremo minimo del eje ancho, +1 si del maximo y 0 si no se reconocen
+     * (entonces la bisagra se elige solo por el barrido, como antes).
+     *
+     * Antes la bisagra se elegia solo por el barrido libre; en puerta.004 y puerta.005 los dos cantos daban el
+     * mismo resultado y ganaba el minimo, que es justo donde estan sus pomos: la hoja giraba sobre el picaporte.
+     */
+    private static int cantoPicaporte(Node hoja, Matrix4 instancia, Puerta p, BoundingBox caja) {
+        Matrix4 m = new Matrix4(instancia).mul(hoja.globalTransform);
+        FloatArray fino = new FloatArray();
+        FloatArray anchoCoord = new FloatArray();
+        Vector3 v = new Vector3();
+        for (NodePart np : hoja.parts) {
+            Mesh mesh = np.meshPart.mesh;
+            VertexAttribute pos = mesh.getVertexAttribute(VertexAttributes.Usage.Position);
+            if (pos == null) {
+                continue;
+            }
+            int stride = mesh.getVertexSize() / 4;
+            int off = pos.offset / 4;
+            float[] verts = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(verts);
+            short[] idx = null;
+            if (mesh.getNumIndices() > 0) {
+                idx = new short[mesh.getNumIndices()];
+                mesh.getIndices(idx);
+            }
+            int n = idx != null ? np.meshPart.size : mesh.getNumVertices();
+            for (int i = 0; i < n; i++) {
+                int k = idx != null ? (idx[np.meshPart.offset + i] & 0xFFFF) : i;
+                v.set(verts[k * stride + off], verts[k * stride + off + 1], verts[k * stride + off + 2]).mul(m);
+                float alto = v.y - caja.min.y;
+                if (alto < 0.7f || alto > 1.2f) {
+                    continue;
+                }
+                fino.add(p.delgadaEnX ? v.x - p.centro.x : v.z - p.centro.z);
+                anchoCoord.add(p.delgadaEnX ? v.z : v.x);
+            }
+        }
+        float maxDesvio = 0f;
+        for (int i = 0; i < fino.size; i++) {
+            maxDesvio = Math.max(maxDesvio, Math.abs(fino.get(i)));
+        }
+        float suma = 0f;
+        int cuenta = 0;
+        for (int i = 0; i < fino.size; i++) {
+            if (Math.abs(fino.get(i)) > 0.6f * maxDesvio) {
+                suma += anchoCoord.get(i);
+                cuenta++;
+            }
+        }
+        if (cuenta == 0 || maxDesvio < 0.05f) {
+            return 0;
+        }
+        float min = p.delgadaEnX ? caja.min.z : caja.min.x;
+        float u = (suma / cuenta - min) / p.ancho;   // 0 .. 1 a lo ancho de la hoja
+        return u < 0.3f ? -1 : (u > 0.7f ? 1 : 0);
     }
 
     /** Avanza todas las puertas. posiciones: jugador y animatronicos (cualquiera las abre). */

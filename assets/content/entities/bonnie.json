@@ -7,5 +7,10 @@
         "idle": "Bonnie_Idle",
         "walk": "Bonnie_Walk"
     },
+    "huesos": {
+        "cabeza": "bip_head_bonnie.qc_skeleton",
+        "torso": "bip_spine_0_bonnie.qc_skeleton",
+        "mandibula": "bip_jaw_bonnie.qc_skeleton"
+    },
     "aiControlled": true
 }

@@ -102,6 +102,8 @@ public class SalidaExterior implements Disposable {
     private PointLightEx luzLamparaPared;
     private SpotLightEx faroIzquierdo;
     private SpotLightEx faroDerecho;
+    /** Resplandor rojo de las luces traseras (CLAUDE.md §2.68): ilumina a Freddy cuando persigue al auto. */
+    private PointLightEx luzTraseras;
     private Material materialFaros;
     private Material materialTraseras;
     private Material materialIndicadores;
@@ -391,6 +393,11 @@ public class SalidaExterior implements Disposable {
         sceneManager.environment.add(luzLamparaPared);
         faroIzquierdo = crearFaroAuto(sceneManager);
         faroDerecho = crearFaroAuto(sceneManager);
+        luzTraseras = new PointLightEx();
+        luzTraseras.setColor(1f, 0.06f, 0.04f, 1f);
+        luzTraseras.range = 7f;
+        luzTraseras.intensity = 0f;
+        sceneManager.environment.add(luzTraseras);
     }
 
     private SpotLightEx crearFaroAuto(SceneManager sceneManager) {
@@ -717,6 +724,10 @@ public class SalidaExterior implements Disposable {
         puntoAuto(-0.62f, 0.62f, 2.42f, faroDerecho.position);
         faroIzquierdo.intensity = intensidad;
         faroDerecho.intensity = intensidad;
+        if (luzTraseras != null) {
+            puntoAuto(0f, 0.8f, -2.75f, luzTraseras.position);
+            luzTraseras.intensity = farosEncendidos ? 2.6f : 0f;
+        }
     }
 
     @Override

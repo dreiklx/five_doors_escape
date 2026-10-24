@@ -22,6 +22,7 @@ import com.fivedoorsescape.content.ExteriorDefinition;
 import com.fivedoorsescape.content.MapDefinition;
 import com.fivedoorsescape.io.HandoffData;
 import com.fivedoorsescape.io.HandoffReader;
+import com.fivedoorsescape.util.EstadoVentana;
 import com.fivedoorsescape.util.Lang;
 
 /**
@@ -35,6 +36,8 @@ import com.fivedoorsescape.util.Lang;
 public class BootScreen implements Screen {
 
     private static final int CANTIDAD_CONSEJOS = 7;
+    private boolean focoPedido = false;
+    private boolean focoReintentado = false;
 
     private final Game game;
     private final AssetService assets = new AssetService();
@@ -134,6 +137,14 @@ public class BootScreen implements Screen {
     public void render(float delta) {
         float dt = Math.min(delta, 0.1f);
         tiempo += dt;
+        // primer cuadro ya visible: la ventana pide el foco; si a los 0.6 s no lo tiene, un segundo intento (§2.71)
+        if (!focoPedido) {
+            focoPedido = true;
+            EstadoVentana.pedirFoco();
+        } else if (!EstadoVentana.isEnfocada() && tiempo > 0.6f && !focoReintentado) {
+            focoReintentado = true;
+            EstadoVentana.pedirFoco();
+        }
         boolean listo = fase != 0 || assets.update();
         float progreso = listo ? 1f : assets.getProgress();
         // la barra se acerca al progreso real sin saltos, pero nunca lo adelanta
