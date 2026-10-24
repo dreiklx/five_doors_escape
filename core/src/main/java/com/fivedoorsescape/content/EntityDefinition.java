@@ -22,5 +22,21 @@ public class EntityDefinition {
      * "mandibula" -> nombre del nodo del esqueleto en el glb. Opcional: sin entrada, la entidad solo usa su animacion. */
     public ObjectMap<String, String> huesos = new ObjectMap<>();
 
+    /** Pasos sincronizados con la animacion (CLAUDE.md §2.73): perfil por nombre ("interior" al caminar dentro de la
+     * pizzeria, "carrera" para Freddy en la persecucion del estacionamiento). Los huesos de los pies van en "huesos"
+     * con las claves "pieIzquierdo" y "pieDerecho". Sin perfiles, la entidad no tiene pasos. */
+    public ObjectMap<String, PerfilPasos> pasos = new ObjectMap<>();
+
     public boolean aiControlled = false;
+
+    public static class PerfilPasos {
+        /** Variaciones (se elige una distinta de la anterior en cada pisada). */
+        public String[] sonidos = new String[0];
+        public float volumen = 0.8f;
+        /** Distancia horizontal a la que la pisada deja de oirse; a menos de distanciaMinima suena al volumen pleno. */
+        public float distanciaMinima = 1.5f;
+        public float distanciaMaxima = 16f;
+        public float tonoMin = 0.95f;
+        public float tonoMax = 1.05f;
+    }
 }

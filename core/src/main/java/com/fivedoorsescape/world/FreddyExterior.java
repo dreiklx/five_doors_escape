@@ -5,6 +5,7 @@ import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.fivedoorsescape.audio.PasosAnimatronicos;
 import com.fivedoorsescape.cinematics.PoseProcedural;
 import com.fivedoorsescape.content.ExteriorDefinition;
 import com.fivedoorsescape.ecs.Mappers;
@@ -20,23 +21,30 @@ import com.fivedoorsescape.ecs.components.TransformComponent;
  *   por que esta afuera: lo siguio). Tiene un collider de su tamano (antes se lo atravesaba como a un decorado) que
  *   tapa el regreso al edificio. Si el jugador se acerca a menos de 3.4 m, lo amenaza: gira el cuerpo y la cabeza
  *   hacia el, se inclina, abre la mandibula y suenan un servo y su risa (una vez por acercamiento). No ataca.
+ *   Susto (CLAUDE.md §2.74, una sola vez por partida): si el jugador se le acerca a menos de 2.3 m mirandolo (o a
+ *   menos de 1.5 m aunque no lo mire), Freddy embiste hacia el (hasta 0.45 m, sin entrar en la camara), echa el torso
+ *   adelante, abre la mandibula del todo y la cabeza se sacude; suenan un golpe, el servo y un grito corto, y la camara
+ *   tiembla y se cierra (getIntensidadSusto). Su collider no se mueve: no empuja ni atrapa, no hay derrota.
  * - PERSIGUE (solo en la cinematica del auto): echa a correr hacia el auto (la animacion de caminar al 1.9x, hasta
- *   5.2 m/s), lo persigue mientras se aleja y queda atras.
+ *   5.2 m/s), lo persigue mientras se aleja y queda atras. Sus pisadas salen de PasosAnimatronicos con el perfil
+ *   "carrera" (asfalto), sincronizadas con la animacion (CLAUDE.md §2.73).
  * - EN_PORTON: se detiene en el porton abierto, sin salir del estacionamiento, y se queda mirando como se va el auto.
  */
 public class FreddyExterior {
 
     public enum Estado { AUSENTE, EN_PUERTA, PERSIGUE, EN_PORTON }
 
-    public static final String SONIDO_PASO = "audio/sfx/freddy_run_step.wav";
-
     private static final float DISTANCIA_AMENAZA = 3.4f;
     private static final float GIRO_MAX_DESDE_PUERTA = 70f;
     private static final float VELOCIDAD_MAXIMA = 5.2f;
     private static final float ACELERACION = 6.5f;
     private static final float VELOCIDAD_ANIMACION_CORRER = 1.9f;
-    private static final float PERIODO_PASO = 0.31f;
     private static final float YAW_PUERTA = -90f;
+    private static final float DISTANCIA_SUSTO_MIRANDO = 2.3f;
+    private static final float DISTANCIA_SUSTO = 1.5f;
+    private static final float DURACION_SUSTO = 1.15f;
+    private static final float EMBESTIDA_MAX = 0.45f;
+    private static final float DURACION_GRITO = 0.75f;
 
     private final Entity freddy;
     private final TransformComponent transform;
@@ -45,7 +53,9 @@ public class FreddyExterior {
     private final PoseProcedural pose;
     private final Sound sonidoServo;
     private final Sound sonidoRisa;
-    private final Sound sonidoPaso;
+    private final Sound sonidoGrito;
+    private final Sound sonidoGolpe;
+    private final PasosAnimatronicos pasos;
     private final BoundingBox collider = new BoundingBox();
     private boolean colliderPuesto = false;
 
@@ -53,13 +63,16 @@ public class FreddyExterior {
     private float amenaza = 0f;
     private boolean sonoAmenaza = false;
     private float velocidad = 0f;
-    private float relojPaso = 0f;
     private final Vector3 mirarA = new Vector3();
     private boolean mirando = false;
     private final Vector3 tmp = new Vector3();
+    private boolean sustoHecho = false;
+    private float tiempoSusto = -1f;
+    private float embestida = 0f;
+    private long idGrito = -1;
 
     public FreddyExterior(Entity freddy, CollisionWorld mundo, ExteriorDefinition def, PoseProcedural pose,
-            Sound servo, Sound risa, Sound paso) {
+            Sound servo, Sound risa, Sound grito, Sound golpe, PasosAnimatronicos pasos) {
         this.freddy = freddy;
         this.transform = Mappers.transform.get(freddy);
         this.mundo = mundo;
@@ -67,7 +80,9 @@ public class FreddyExterior {
         this.pose = pose;
         this.sonidoServo = servo;
         this.sonidoRisa = risa;
-        this.sonidoPaso = paso;
+        this.pasos = pasos;
+        this.sonidoGrito = grito;
+        this.sonidoGolpe = golpe;
     }
 
     public Estado getEstado() {
@@ -94,12 +109,13 @@ public class FreddyExterior {
         colliderPuesto = true;
     }
 
-    /** Durante el juego (exterior): reaccion de amenaza si el jugador se acerca. */
-    public void actualizarJuego(float dt, Vector3 ojoJugador) {
+    /** Durante el juego (exterior): reaccion de amenaza si el jugador se acerca, y el susto (una vez). */
+    public void actualizarJuego(float dt, Vector3 ojoJugador, Vector3 direccionMirada) {
         if (estado != Estado.EN_PUERTA) {
             return;
         }
-        float d = Vector3.dst(ojoJugador.x, 0f, ojoJugador.z, transform.position.x, 0f, transform.position.z);
+        float d = Vector3.dst(ojoJugador.x, 0f, ojoJugador.z, def.freddyDoorX, 0f, def.freddyDoorZ);
+        actualizarSusto(dt, ojoJugador, direccionMirada, d);
         boolean cerca = d < DISTANCIA_AMENAZA;
         amenaza = MathUtils.clamp(amenaza + (cerca ? dt / 0.6f : -dt / 1.5f), 0f, 1f);
         if (cerca && !sonoAmenaza) {
@@ -118,9 +134,71 @@ public class FreddyExterior {
                 * MathUtils.radiansToDegrees;
         float deseado = YAW_PUERTA + MathUtils.clamp(diferencia(objetivo, YAW_PUERTA), -GIRO_MAX_DESDE_PUERTA,
                 GIRO_MAX_DESDE_PUERTA) * amenaza;
-        transform.yawDegrees = acercarAngulo(transform.yawDegrees, deseado, 90f * dt);
+        transform.yawDegrees = acercarAngulo(transform.yawDegrees, deseado, (tiempoSusto >= 0f ? 400f : 90f) * dt);
         mirarA.set(ojoJugador);
         mirando = amenaza > 0.001f;
+        // la embestida es solo visual: el collider sigue en la puerta
+        transform.position.set(def.freddyDoorX + MathUtils.sinDeg(transform.yawDegrees) * embestida, 0f,
+                def.freddyDoorZ + MathUtils.cosDeg(transform.yawDegrees) * embestida);
+    }
+
+    private void actualizarSusto(float dt, Vector3 ojo, Vector3 mirada, float d) {
+        if (!sustoHecho) {
+            tmp.set(def.freddyDoorX - ojo.x, 1.4f - ojo.y, def.freddyDoorZ - ojo.z).nor();
+            boolean loMira = mirada != null && tmp.dot(mirada) > 0.8f;
+            if (d < DISTANCIA_SUSTO || (d < DISTANCIA_SUSTO_MIRANDO && loMira)) {
+                sustoHecho = true;
+                tiempoSusto = 0f;
+                amenaza = 1f;
+                sonoAmenaza = true;   // la risa de la amenaza no se suma encima del susto
+                if (sonidoGolpe != null) {
+                    sonidoGolpe.play(0.9f, 0.8f, 0f);
+                }
+                if (sonidoServo != null) {
+                    sonidoServo.play(1f, 1.15f, 0f);
+                }
+                if (sonidoGrito != null) {
+                    idGrito = sonidoGrito.play(0.55f, 0.82f, 0f);
+                }
+            }
+        }
+        if (tiempoSusto < 0f) {
+            return;
+        }
+        tiempoSusto += dt;
+        if (idGrito != -1 && tiempoSusto >= DURACION_GRITO) {
+            sonidoGrito.stop(idGrito);   // un grito corto: el completo es el del jumpscare de verdad
+            idGrito = -1;
+        }
+        // embiste en 0.12 s, se queda encima hasta 0.5 s y vuelve despacio a la puerta; nunca a menos de 0.9 m del ojo
+        float t = tiempoSusto;
+        float u = t < 0.12f ? t / 0.12f : t < 0.5f ? 1f : Math.max(0f, 1f - (t - 0.5f) / (DURACION_SUSTO - 0.5f));
+        u = u * u * (3f - 2f * u);
+        embestida = MathUtils.clamp(Math.min(EMBESTIDA_MAX, d - 0.9f), 0f, EMBESTIDA_MAX) * u;
+        if (tiempoSusto >= DURACION_SUSTO) {
+            tiempoSusto = -1f;
+            embestida = 0f;
+        }
+    }
+
+    /** 0..1: fuerza del susto en este instante (para el temblor y el cierre de la camara). 0 fuera del susto. */
+    public float getIntensidadSusto() {
+        if (tiempoSusto < 0f) {
+            return 0f;
+        }
+        return tiempoSusto < 0.08f ? tiempoSusto / 0.08f : Math.max(0f, 1f - (tiempoSusto - 0.08f) / (DURACION_SUSTO - 0.08f));
+    }
+
+    public boolean isSustoHecho() {
+        return sustoHecho;
+    }
+
+    /** Corta el grito si el susto queda a medias (pausa larga, cinematica, salida de la pantalla). */
+    public void detenerSonidosSusto() {
+        if (idGrito != -1 && sonidoGrito != null) {
+            sonidoGrito.stop(idGrito);
+            idGrito = -1;
+        }
     }
 
     /** Cinematica: hacia donde mira la cabeza mientras sigue en la puerta (null = sin mirada). */
@@ -140,17 +218,22 @@ public class FreddyExterior {
             return;
         }
         quitarCollider();
+        detenerSonidosSusto();
+        tiempoSusto = -1f;
+        embestida = 0f;
         estado = Estado.PERSIGUE;
         velocidad = 0f;
-        relojPaso = PERIODO_PASO * 0.5f;
         animar("walk", VELOCIDAD_ANIMACION_CORRER);
+        if (pasos != null) {
+            pasos.usarPerfil(freddy, "carrera");
+        }
     }
 
     /**
      * Cinematica: corre hacia "objetivo" (un punto detras del auto) sin salir del estacionamiento: al llegar a la linea
-     * del porton se detiene ahi (EN_PORTON). camara: para el volumen de los pasos.
+     * del porton se detiene ahi (EN_PORTON).
      */
-    public void actualizarPersecucion(float dt, Vector3 objetivo, Vector3 camara) {
+    public void actualizarPersecucion(float dt, Vector3 objetivo) {
         if (estado == Estado.EN_PORTON) {
             mirarA.set(objetivo.x, 1.2f, objetivo.z);
             mirando = true;
@@ -183,15 +266,6 @@ public class FreddyExterior {
             animar("idle", 1f);
             if (sonidoServo != null) {
                 sonidoServo.play(0.35f, 0.8f, 0f);
-            }
-        }
-        relojPaso -= dt;
-        if (estado == Estado.PERSIGUE && relojPaso <= 0f) {
-            relojPaso += PERIODO_PASO;
-            if (sonidoPaso != null) {
-                float dist = camara.dst(transform.position);
-                float vol = MathUtils.clamp(1.1f - dist / 18f, 0.08f, 0.95f);
-                sonidoPaso.play(vol, MathUtils.random(0.9f, 1.08f), 0f);
             }
         }
         mirarA.set(objetivo.x, 1.3f, objetivo.z);
@@ -227,6 +301,14 @@ public class FreddyExterior {
             torso = 9f * amenaza;
             mandibula = 12f * amenaza;
             ladeo = -5f * amenaza;
+            float susto = getIntensidadSusto();
+            if (susto > 0f) {
+                // torso adelante, mandibula abierta del todo y la cabeza que se sacude
+                torso += 16f * susto;
+                mandibula += 22f * susto;
+                ladeo += MathUtils.sin(tiempoSusto * 55f) * 9f * susto;
+                peso = 1f;
+            }
         } else if (estado == Estado.PERSIGUE) {
             torso = 14f;                       // corriendo, echado hacia adelante
             peso = 0.7f;

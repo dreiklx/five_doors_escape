@@ -34,6 +34,7 @@ public class EscapeVictoryScreen implements Screen {
     private BitmapFont fontTitulo;
     private BitmapFont fontMensaje;
     private Sound sonidoVictoria;
+    private Sound sonidoVictoriaReal;
     private long idSonidoVictoria = -1;
 
     public EscapeVictoryScreen(Game game, HandoffData handoff) {
@@ -58,7 +59,11 @@ public class EscapeVictoryScreen implements Screen {
         // Cargado directo (no via AssetService/BootScreen): esta pantalla solo se alcanza una
         // vez, al final de una partida ganada -- no vale la pena precargarlo desde el arranque
         // para un uso que puede no llegar a ocurrir nunca en una sesion dada.
-        sonidoVictoria = Gdx.audio.newSound(Gdx.files.internal("audio/music/victory_circus.wav"));
+        // Con el volumen de musica del menu de pausa (CLAUDE.md §2.75).
+        com.fivedoorsescape.audio.VolumenAudio.cargar();
+        sonidoVictoriaReal = Gdx.audio.newSound(Gdx.files.internal("audio/music/victory_circus.wav"));
+        sonidoVictoria = new com.fivedoorsescape.audio.SonidoConVolumen(sonidoVictoriaReal,
+                com.fivedoorsescape.audio.VolumenAudio.Categoria.MUSICA);
         idSonidoVictoria = sonidoVictoria.loop();
     }
 
@@ -110,5 +115,6 @@ public class EscapeVictoryScreen implements Screen {
             sonidoVictoria.stop(idSonidoVictoria);
         }
         sonidoVictoria.dispose();
+        sonidoVictoriaReal.dispose();
     }
 }

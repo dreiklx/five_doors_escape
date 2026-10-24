@@ -9,7 +9,24 @@
     },
     "huesos": {
         "cabeza": "Bone.003_Armature_7",
-        "torso": "Bone.001_Armature_5"
+        "torso": "Bone.001_Armature_5",
+        "pieIzquierdo": "Bone.014_Armature_167",
+        "pieDerecho": "Bone.015_Armature_186"
+    },
+    "pasos": {
+        "interior": {
+            "sonidos": [
+                "audio/sfx/steps/chica_step_1.wav",
+                "audio/sfx/steps/chica_step_2.wav",
+                "audio/sfx/steps/chica_step_3.wav",
+                "audio/sfx/steps/chica_step_4.wav"
+            ],
+            "volumen": 0.9,
+            "distanciaMinima": 1.5,
+            "distanciaMaxima": 16.0,
+            "tonoMin": 0.94,
+            "tonoMax": 1.04
+        }
     },
     "aiControlled": true
 }

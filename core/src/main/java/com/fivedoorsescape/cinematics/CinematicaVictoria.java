@@ -52,7 +52,7 @@ public class CinematicaVictoria {
     /** Todo lo que BootScreen debe cargar para esta secuencia (incluidos los de la apertura de puertas). */
     public static final String[] SONIDOS = {SalidaExterior.SONIDO_AMBIENTE_NOCHE, SalidaExterior.SONIDO_PUERTA_SALIDA,
             SalidaExterior.SONIDO_PUERTA_EMERGENCIA, SONIDO_PUERTA_ABRE, SONIDO_PUERTA_CIERRA, SONIDO_ARRANQUE,
-            SONIDO_MARCHA, SONIDO_BARRERA, FreddyExterior.SONIDO_PASO, CinematicaDerrota.SONIDO_SERVO};
+            SONIDO_MARCHA, SONIDO_BARRERA, CinematicaDerrota.SONIDO_SERVO};
 
     public static final float DURACION = 16.5f;
     private static final float T_SENTADO = 2.9f;
@@ -310,7 +310,7 @@ public class CinematicaVictoria {
         } else {
             salida.puntoAuto(0f, 0f, -3.5f, objetivoFreddy);
         }
-        freddy.actualizarPersecucion(dt, objetivoFreddy, camera.position);
+        freddy.actualizarPersecucion(dt, objetivoFreddy);
     }
 
     private void moverCamara() {

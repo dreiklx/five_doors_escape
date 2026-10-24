@@ -55,7 +55,20 @@ public class FirstPersonCameraController {
         this.yawDegrees = initialYawDegrees;
     }
 
+    private int cuadrosSinRaton = 0;
+
+    /** Descarta el movimiento del raton durante unos cuadros (al recapturar el cursor el primer delta es un salto). */
+    public void ignorarMovimientoRaton(int cuadros) {
+        cuadrosSinRaton = Math.max(cuadrosSinRaton, cuadros);
+    }
+
     public void update() {
+        if (cuadrosSinRaton > 0) {
+            cuadrosSinRaton--;
+            Gdx.input.getDeltaX();
+            Gdx.input.getDeltaY();
+            return;
+        }
         if (Gdx.input.isCursorCatched()) {
             yawDegrees -= Gdx.input.getDeltaX() * mouseSensitivity;
             pitchDegrees -= Gdx.input.getDeltaY() * mouseSensitivity;

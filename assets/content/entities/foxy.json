@@ -10,7 +10,24 @@
     "huesos": {
         "cabeza": "bip_head_foxy.qc_skeleton",
         "torso": "bip_spine_0_foxy.qc_skeleton",
-        "mandibula": "bip_jaw_foxy.qc_skeleton"
+        "mandibula": "bip_jaw_foxy.qc_skeleton",
+        "pieIzquierdo": "bip_foot_L_foxy.qc_skeleton",
+        "pieDerecho": "bip_foot_R_foxy.qc_skeleton"
+    },
+    "pasos": {
+        "interior": {
+            "sonidos": [
+                "audio/sfx/steps/foxy_step_1.wav",
+                "audio/sfx/steps/foxy_step_2.wav",
+                "audio/sfx/steps/foxy_step_3.wav",
+                "audio/sfx/steps/foxy_step_4.wav"
+            ],
+            "volumen": 0.85,
+            "distanciaMinima": 1.5,
+            "distanciaMaxima": 15.0,
+            "tonoMin": 0.97,
+            "tonoMax": 1.09
+        }
     },
     "aiControlled": true
 }

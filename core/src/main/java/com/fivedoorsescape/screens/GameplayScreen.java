@@ -124,8 +124,6 @@ public class GameplayScreen implements Screen {
     // (mismo mecanismo Gdx.app.exit() que Swing ya detecta via Process.waitFor(), ver
     // LanzadorEscape del lado Swing). Sin botones de configuracion/reanudar (pedido explicito
     // del usuario) -- ESC de nuevo ya cierra el menu, es la unica forma de reanudar.
-    private static final float PAUSA_BOTON_ANCHO = 300f;
-    private static final float PAUSA_BOTON_ALTO = 54f;
 
     /** Rutas de los 2 sonidos genericos de la secuencia de atrapada -- ver decision de diseno del
      * usuario 2026-08-03: reutilizar el jumpscare/estatica genericos ya existentes (ni Swing tiene
@@ -341,6 +339,15 @@ public class GameplayScreen implements Screen {
     private float chispaRestante = 0f;
 
     private boolean pausado = false;
+    /** Menu de pausa completo (CLAUDE.md §2.75): Continuar, Volumen, Controles, Reiniciar y Salir. */
+    private MenuPausa menuPausa;
+    private final boolean reinicio;
+    private boolean introSaltadaPorReinicio = false;
+    /** Al reiniciar desde la pausa, la pantalla nueva usa los mismos assets: esta no los libera en dispose(). */
+    private boolean conservarAssets = false;
+    private static final float FOV_BASE = 67f;
+    /** Pisadas sincronizadas con la animacion de los cuatro animatronicos (CLAUDE.md §2.73). */
+    private final com.fivedoorsescape.audio.PasosAnimatronicos pasos = new com.fivedoorsescape.audio.PasosAnimatronicos();
     /** Se mostro "Haz clic para entrar": al activarse hay que volver a capturar el cursor (§2.71). */
     private boolean activacionPendiente = false;
     /** Tiempo real transcurrido en JUGANDO (no se resetea al pausar/despausar) -- controla el
@@ -600,10 +607,17 @@ public class GameplayScreen implements Screen {
     private boolean goldenFreddyCuerpoVisible = true;
 
     public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff) {
+        this(game, registry, assets, handoff, false);
+    }
+
+    /** reinicio=true (menu de pausa, CLAUDE.md §2.75): la partida nueva salta la introduccion y empieza en las
+     * instrucciones, con los mismos assets ya cargados. */
+    public GameplayScreen(Game game, ContentRegistry registry, AssetService assets, HandoffData handoff, boolean reinicio) {
         this.game = game;
         this.registry = registry;
         this.assets = assets;
         this.handoff = handoff;
+        this.reinicio = reinicio;
     }
 
     @Override
@@ -633,7 +647,7 @@ public class GameplayScreen implements Screen {
                 mapDef.stageHeight);
 
 
-        camera = new PerspectiveCamera(67f, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        camera = new PerspectiveCamera(FOV_BASE, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.near = 0.05f;
         camera.far = 100f;
         cameraController = new FirstPersonCameraController(camera, mapDef.playerStartYawDegrees);
@@ -942,6 +956,22 @@ public class GameplayScreen implements Screen {
         uiFont.getData().setScale(1.3f);
         uiFont.setColor(Color.WHITE);
         uiShapes = new ShapeRenderer();
+        menuPausa = new MenuPausa(handoff.idioma, uiBatch, uiShapes, new MenuPausa.Acciones() {
+            @Override
+            public void continuar() {
+                reanudarDesdePausa();
+            }
+
+            @Override
+            public void reiniciar() {
+                reiniciarPartida();
+            }
+
+            @Override
+            public void salir() {
+                Gdx.app.exit();   // el mismo cierre que detecta FDAF (LanzadorEscape) para volver a su menu
+            }
+        });
 
         texturaCorazonLleno = new Texture(Gdx.files.internal("ui/heart_full.png"));
         texturaCorazonVacio = new Texture(Gdx.files.internal("ui/heart_empty.png"));
@@ -1306,6 +1336,10 @@ public class GameplayScreen implements Screen {
      * falta.
      */
     private void pausarAudioContinuo() {
+        pasos.pausar();
+        if (freddyExterior != null) {
+            freddyExterior.detenerSonidosSusto();
+        }
         if (idSonidoMusicaFreddy != -1) {
             sonidoMusicaFreddy.pause(idSonidoMusicaFreddy);
         }
@@ -1319,6 +1353,7 @@ public class GameplayScreen implements Screen {
     }
 
     private void reanudarAudioContinuo() {
+        pasos.reanudar();
         if (idSonidoMusicaFreddy != -1) {
             sonidoMusicaFreddy.resume(idSonidoMusicaFreddy);
         }
@@ -1567,6 +1602,7 @@ public class GameplayScreen implements Screen {
         cinematicaVictoria = new CinematicaVictoria(camera, salidaExterior, assets, v -> volumenAmbienteNocheObjetivo = v,
                 freddyExterior, Lang.get(handoff.idioma, "cinematic.skip"));
         cinematicaVictoria.iniciar();
+        pasos.detenerTodo();
         estado = EstadoPartida.VICTORIA_CINEMATICA;
         tiempoEnEstado = 0f;
     }
@@ -1590,7 +1626,7 @@ public class GameplayScreen implements Screen {
                     : null;
             freddyExterior = new com.fivedoorsescape.world.FreddyExterior(freddyEntity, collisionWorld,
                     salidaExterior.getDefinicion(), pose, assets.getSound(CinematicaDerrota.SONIDO_SERVO), sonidoRisaFreddy,
-                    assets.getSound(com.fivedoorsescape.world.FreddyExterior.SONIDO_PASO));
+                    sonidoJumpscare, assets.getSound(CinematicaDerrota.SONIDO_GOLPE), pasos);
         }
     }
 
@@ -1608,6 +1644,25 @@ public class GameplayScreen implements Screen {
         if (tmpInterseccion.dot(camera.direction) < 0.2f) {
             colocarFreddyEnPuertaEmergencia();
         }
+    }
+
+    /** Refuerzo de camara del susto de Freddy en la puerta (CLAUDE.md §2.74): temblor, giro y cierre del campo de
+     * vision que se apagan con el susto. Solo cosmetico: la posicion del jugador no cambia, y applyToCamera repone
+     * posicion, direccion y "up" en el cuadro siguiente. */
+    private void aplicarSustoCamara(float intensidad) {
+        if (intensidad <= 0f) {
+            if (camera.fieldOfView != FOV_BASE) {
+                camera.fieldOfView = FOV_BASE;
+                camera.update();
+            }
+            return;
+        }
+        float k = intensidad * intensidad;
+        camera.position.add(MathUtils.random(-1f, 1f) * 0.06f * k, MathUtils.random(-1f, 1f) * 0.04f * k,
+                MathUtils.random(-1f, 1f) * 0.06f * k);
+        camera.rotate(camera.direction, MathUtils.random(-1f, 1f) * 3f * k);
+        camera.fieldOfView = FOV_BASE - 10f * intensidad;
+        camera.update();
     }
 
     private void actualizarAmbienteNoche(float dt) {
@@ -1643,6 +1698,8 @@ public class GameplayScreen implements Screen {
         if (freddyExterior != null) {
             freddyExterior.despuesDeAnimar();
         }
+        // la persecucion de Freddy detras del auto (perfil "carrera"); el resto esta quieto
+        pasos.actualizar(dt, camera, true);
         sceneManager.render();
         cinematicaVictoria.dibujarOverlay(uiBatch, uiShapes, uiFont);
     }
@@ -1746,6 +1803,7 @@ public class GameplayScreen implements Screen {
     }
 
     private void iniciarGoldenFreddyJumpscare() {
+        pasos.detenerTodo();
         estado = EstadoPartida.GOLDEN_FREDDY_JUMPSCARE;
         tiempoEnEstadoGoldenFreddy = 0f;
         goldenFreddyJumpscareYaOcurrido = true;
@@ -2091,18 +2149,14 @@ public class GameplayScreen implements Screen {
         // ALT+TAB o un clic fuera: se abre la pausa (mundo y audio detenidos, cursor libre). Al volver sigue en pausa
         // y se reanuda con ESC, como siempre (§2.71).
         if (!pausado && !com.fivedoorsescape.util.EstadoVentana.isEnfocada()) {
-            pausado = true;
-            Gdx.input.setCursorCatched(false);
-            pausarAudioContinuo();
-        }
-
-        if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            pausado = !pausado;
-            Gdx.input.setCursorCatched(!pausado);
-            if (pausado) {
-                pausarAudioContinuo();
-            } else {
-                reanudarAudioContinuo();
+            abrirPausa();
+        } else if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            if (!pausado) {
+                abrirPausa();
+            } else if (!menuPausa.escape()) {
+                // ESC en el panel principal cierra el menu; en un subpanel solo vuelve al principal
+                reanudarDesdePausa();
+                return;
             }
         }
 
@@ -2114,7 +2168,7 @@ public class GameplayScreen implements Screen {
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
             sceneManager.update(0f);
             sceneManager.render();
-            dibujarMenuPausa();
+            menuPausa.actualizarYDibujar();
             return;
         }
 
@@ -2168,7 +2222,8 @@ public class GameplayScreen implements Screen {
         salidaExterior.actualizar(dt);
         actualizarFreddyEnPuerta(playerTransform.position);
         if (freddyExterior != null) {
-            freddyExterior.actualizarJuego(dt, camera.position);
+            freddyExterior.actualizarJuego(dt, camera.position, camera.direction);
+            aplicarSustoCamara(freddyExterior.getIntensidadSusto());
         }
         actualizarAmbienteNoche(dt);
 
@@ -2180,6 +2235,7 @@ public class GameplayScreen implements Screen {
         if (freddyExterior != null) {
             freddyExterior.despuesDeAnimar();
         }
+        pasos.actualizar(dt, camera, true);
         sceneManager.render();
 
         actualizarLatidosYVineta(playerTransform.position);
@@ -2443,6 +2499,12 @@ public class GameplayScreen implements Screen {
     private final Vector3 cinematicaObjInterp = new Vector3();
 
     private void actualizarCinematicaInicial(float dt) {
+        if (reinicio && !introSaltadaPorReinicio) {
+            // partida reiniciada desde la pausa: sin introduccion, directo a las instrucciones
+            introSaltadaPorReinicio = true;
+            finalizarIntro(false);
+            return;
+        }
         if (tiempoEnEstado == 0f) {
             sceneManager.setAmbientLight(AMBIENTE_CINEMATICA);
             luzDireccional.intensity = INTENSIDAD_DIRECCIONAL_CINEMATICA;
@@ -2642,6 +2704,7 @@ public class GameplayScreen implements Screen {
     // ------------------------------------------------------------------
 
     private void iniciarJumpscare(AIComponent culpable) {
+        pasos.detenerTodo();
         estado = EstadoPartida.JUMPSCARE;
         tiempoEnEstado = 0f;
         guardiaQueAtrapo = culpable;
@@ -2751,6 +2814,7 @@ public class GameplayScreen implements Screen {
                     }
                 }, Lang.get(handoff.idioma, "cinematic.skip"), registry);
         cinematicaDerrota.iniciar();
+        pasos.detenerTodo();
         estado = EstadoPartida.DERROTA_CINEMATICA;
         tiempoEnEstado = 0f;
     }
@@ -2970,52 +3034,33 @@ public class GameplayScreen implements Screen {
         Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
-    /**
-     * Menu de pausa (pedido explicito del usuario 2026-08-05): overlay semitransparente de
-     * pantalla completa + un panel centrado con una unica opcion real, "salir al menu principal"
-     * -- sin botones de configuracion/reanudar (ESC de nuevo ya cierra el menu). Mismo mecanismo
-     * de salida (Gdx.app.exit()) que ya usan NightGameOverScreen/EscapeVictoryScreen y que Swing
-     * ya detecta correctamente via LanzadorEscape/Process.waitFor().
-     */
-    private void dibujarMenuPausa() {
-        float anchoPantalla = Gdx.graphics.getWidth();
-        float altoPantalla = Gdx.graphics.getHeight();
+    /** Abre la pausa (ESC o perdida del foco, §2.71): mundo y audio detenidos, cursor libre, menu en el panel principal. */
+    private void abrirPausa() {
+        pausado = true;
+        Gdx.input.setCursorCatched(false);
+        pausarAudioContinuo();
+        menuPausa.abrir();
+    }
 
-        float botonX = anchoPantalla / 2f - PAUSA_BOTON_ANCHO / 2f;
-        float botonY = altoPantalla / 2f - PAUSA_BOTON_ALTO / 2f;
-
-        uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, anchoPantalla, altoPantalla);
-        uiShapes.getProjectionMatrix().setToOrtho2D(0, 0, anchoPantalla, altoPantalla);
-
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        uiShapes.begin(ShapeRenderer.ShapeType.Filled);
-        uiShapes.setColor(0f, 0f, 0f, 0.7f);
-        uiShapes.rect(0, 0, anchoPantalla, altoPantalla);
-        uiShapes.setColor(0.15f, 0.15f, 0.15f, 0.9f);
-        uiShapes.rect(botonX, botonY, PAUSA_BOTON_ANCHO, PAUSA_BOTON_ALTO);
-        uiShapes.end();
-        Gdx.gl.glDisable(GL20.GL_BLEND);
-
-        String titulo = Lang.get(handoff.idioma, "pause.title");
-        String textoBoton = Lang.get(handoff.idioma, "pause.exitToMenu");
-        GlyphLayout layoutTitulo = new GlyphLayout(uiFont, titulo);
-        GlyphLayout layoutBoton = new GlyphLayout(uiFont, textoBoton);
-
-        uiBatch.begin();
-        uiFont.draw(uiBatch, layoutTitulo, anchoPantalla / 2f - layoutTitulo.width / 2f, botonY + PAUSA_BOTON_ALTO + 60f);
-        uiFont.draw(uiBatch, layoutBoton, anchoPantalla / 2f - layoutBoton.width / 2f, botonY + PAUSA_BOTON_ALTO / 2f + layoutBoton.height / 2f);
-        uiBatch.end();
-
-        if (Gdx.input.justTouched()) {
-            float touchX = Gdx.input.getX();
-            float touchYDesdeArriba = Gdx.input.getY();
-            float touchYDesdeAbajo = altoPantalla - touchYDesdeArriba;
-            boolean dentroX = touchX >= botonX && touchX <= botonX + PAUSA_BOTON_ANCHO;
-            boolean dentroY = touchYDesdeAbajo >= botonY && touchYDesdeAbajo <= botonY + PAUSA_BOTON_ALTO;
-            if (dentroX && dentroY) {
-                Gdx.app.exit();
-            }
+    /** Cierra la pausa (Continuar o ESC): recaptura el cursor y descarta el salto del raton de ese instante. */
+    private void reanudarDesdePausa() {
+        if (!pausado) {
+            return;
         }
+        pausado = false;
+        menuPausa.cerrar();
+        Gdx.input.setCursorCatched(true);
+        cameraController.ignorarMovimientoRaton(2);
+        reanudarAudioContinuo();
+    }
+
+    /** Reiniciar desde la pausa: una GameplayScreen nueva con los mismos assets, empezando en las instrucciones. */
+    private void reiniciarPartida() {
+        com.fivedoorsescape.audio.VolumenAudio.guardar();
+        conservarAssets = true;
+        GameplayScreen nueva = new GameplayScreen(game, registry, assets, handoff, true);
+        game.setScreen(nueva);
+        dispose();
     }
 
     /**
@@ -3034,6 +3079,7 @@ public class GameplayScreen implements Screen {
         guardias.add(ai);
         entidadesGuardias.add(entidad);
         guardiaSpawns.add(new Vector3(posicion));
+        pasos.registrar(entidad, registry.getEntityDefinition(entityId), assets);
         if (persigueSiempre) {
             // Unico guardia con persigueSiempre=true es Freddy (ver decision de diseno del
             // usuario 2026-08-03) -- identificacion robusta sin depender del orden de creacion.
@@ -3116,6 +3162,10 @@ public class GameplayScreen implements Screen {
 
     @Override
     public void dispose() {
+        pasos.dispose();
+        if (menuPausa != null) {
+            menuPausa.dispose();
+        }
         sceneManager.dispose();
         environmentCubemap.dispose();
         diffuseCubemap.dispose();
@@ -3155,6 +3205,8 @@ public class GameplayScreen implements Screen {
             idAmbienteNoche = -1;
         }
         salidaExterior.dispose();
-        assets.dispose();
+        if (!conservarAssets) {
+            assets.dispose();
+        }
     }
 }

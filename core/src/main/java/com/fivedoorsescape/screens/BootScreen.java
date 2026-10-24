@@ -2,7 +2,6 @@ package com.fivedoorsescape.screens;
 
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -29,13 +28,12 @@ import com.fivedoorsescape.util.Lang;
  * Pantalla de carga de Five Doors Escape (CLAUDE.md §2.59). Fondo del comedor oscurecido con un acercamiento lento,
  * titulo con un leve parpadeo, barra con el progreso REAL del AssetManager (modelos, texturas y sonidos se cargan de a
  * poco en update(), sin bloquear), un indicador que gira para mostrar actividad aunque un archivo grande tarde, y un
- * consejo distinto en cada arranque (no se repite el anterior). Al llegar al 100 % se dibuja un cuadro mas con
+ * consejo (uno solo desde CLAUDE.md §2.76: el aturdimiento con la linterna). Al llegar al 100 % se dibuja un cuadro mas con
  * "Preparando la pizzeria..." y recien entonces se construye GameplayScreen (colisiones, iluminacion, GIFs): antes ese
  * tramo pasaba con la pantalla congelada en "Cargando 100%".
  */
 public class BootScreen implements Screen {
 
-    private static final int CANTIDAD_CONSEJOS = 7;
     private boolean focoPedido = false;
     private boolean focoReintentado = false;
 
@@ -77,6 +75,9 @@ public class BootScreen implements Screen {
         for (String entityId : new String[] {"freddy", "bonnie", "chica", "foxy", "llave", "golden_freddy"}) {
             EntityDefinition def = registry.getEntityDefinition(entityId);
             assets.queueModel(def.modelPath);
+            for (String sonido : com.fivedoorsescape.audio.PasosAnimatronicos.sonidosDe(def)) {
+                assets.queueSound(sonido);
+            }
         }
 
         assets.queueSound(GameplayScreen.SONIDO_JUMPSCARE);
@@ -111,22 +112,10 @@ public class BootScreen implements Screen {
         }
     }
 
-    /** Un consejo distinto del de la vez anterior (guardado en las preferencias propias de Escape, no en el
-     * progreso del jugador de FDAF). */
+    /** El unico consejo de la carga (pedido del usuario, CLAUDE.md §2.76): cuantos ciclos de destellos aturden a cada
+     * animatronico. Los numeros deben coincidir con content/balance/flashlight.json (Foxy 3, Bonnie y Chica 7). */
     private String elegirConsejo() {
-        int indice = MathUtils.random(CANTIDAD_CONSEJOS - 1);
-        try {
-            Preferences prefs = Gdx.app.getPreferences("five_doors_escape");
-            int anterior = prefs.getInteger("ultimoConsejo", -1);
-            if (indice == anterior) {
-                indice = (indice + 1 + MathUtils.random(CANTIDAD_CONSEJOS - 2)) % CANTIDAD_CONSEJOS;
-            }
-            prefs.putInteger("ultimoConsejo", indice);
-            prefs.flush();
-        } catch (Exception e) {
-            Gdx.app.log("BootScreen", "No se pudieron leer/guardar las preferencias del consejo: " + e.getMessage());
-        }
-        return Lang.get(handoff.idioma, "tip." + (indice + 1));
+        return Lang.get(handoff.idioma, "tip.1");
     }
 
     public String getConsejo() {

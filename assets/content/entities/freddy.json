@@ -10,7 +10,37 @@
     "huesos": {
         "cabeza": "j_head_04",
         "torso": "j_spine_03",
-        "mandibula": "j_jaw_06"
+        "mandibula": "j_jaw_06",
+        "pieIzquierdo": "j_l_foot_056",
+        "pieDerecho": "j_r_foot_052"
+    },
+    "pasos": {
+        "interior": {
+            "sonidos": [
+                "audio/sfx/steps/freddy_step_1.wav",
+                "audio/sfx/steps/freddy_step_2.wav",
+                "audio/sfx/steps/freddy_step_3.wav",
+                "audio/sfx/steps/freddy_step_4.wav"
+            ],
+            "volumen": 0.95,
+            "distanciaMinima": 1.5,
+            "distanciaMaxima": 17.0,
+            "tonoMin": 0.94,
+            "tonoMax": 1.03
+        },
+        "carrera": {
+            "sonidos": [
+                "audio/sfx/steps/freddy_chase_step_1.wav",
+                "audio/sfx/steps/freddy_chase_step_2.wav",
+                "audio/sfx/steps/freddy_chase_step_3.wav",
+                "audio/sfx/steps/freddy_chase_step_4.wav"
+            ],
+            "volumen": 1.0,
+            "distanciaMinima": 2.0,
+            "distanciaMaxima": 26.0,
+            "tonoMin": 0.93,
+            "tonoMax": 1.04
+        }
     },
     "aiControlled": true
 }
