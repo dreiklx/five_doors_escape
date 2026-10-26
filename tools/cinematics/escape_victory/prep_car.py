@@ -153,13 +153,39 @@ piso = caja('car_floor', V((0, 0.0, z_piso)), V((ancho - 0.2, 2.0, 0.04)), tela,
 # a lo ancho: la cara superior baja hacia la base del parabrisas, un canto redondeado sobre los indicadores y la
 # cara frontal se retira hacia las rodillas. El bisel suaviza todas las aristas. z0 = altura del techo de la caja
 # anterior, para que la linea del tablero contra el parabrisas no cambie.
-z0_tab = techo_en(y_parabrisas + 0.33) - 0.30
-PERFIL_TABLERO = [(0.06, -0.10), (0.06, -0.035), (0.22, -0.005), (0.36, 0.022), (0.43, 0.030), (0.475, 0.005),
-                  (0.468, -0.105), (0.505, -0.225), (0.45, -0.33), (0.20, -0.33)]
+# Tablero v3 (CLAUDE.md §2.84): el de §2.68 se colocaba con alturas y anchos fijos y, medido, salia 10 cm por cada
+# lado de la cabina (a lo ancho del auto, |x| 0.94 frente a ventanillas en |x| 0.84) y su cara superior asomaba a
+# traves del parabrisas. Ahora todo sale de la carroceria: el borde inferior del parabrisas (yb, zb) y su inclinacion
+# (dy/dz) a partir de las caras de vidrio frontales, y el ancho de la cabina a partir del vidrio y de las ventanillas
+# delanteras. El perfil (plano Y-Z, Y crece hacia el conductor) arranca detras del borde del vidrio y su cara superior
+# sube suave hacia el conductor sin pasar nunca a menos de 3.5 cm del vidrio.
+_vf = [p for p in body.data.polygons if body.data.materials[p.material_index].name == 'Windows' and p.normal.y < -0.3 and p.normal.z > 0.2]
+_pv = [body.data.vertices[i].co for p in _vf for i in p.vertices]
+zb_par = min(p.z for p in _pv)
+_bajos = [p for p in _pv if p.z < zb_par + 0.02]
+yb_par = sum(p.y for p in _bajos) / len(_bajos)
+_altos = [p for p in _pv if p.z > max(q.z for q in _pv) - 0.02]
+k_par = (sum(p.y for p in _altos) / len(_altos) - yb_par) / (max(p.z for p in _pv) - zb_par)
+x_vidrio = max(abs(p.x) for p in _pv if p.z < zb_par + 0.05)
+_vl = [body.data.vertices[i].co for p in body.data.polygons if body.data.materials[p.material_index].name == 'Windows'
+       and abs(p.normal.x) > 0.5 for i in p.vertices]
+_vl_frente = [p for p in _vl if p.y < min(q.y for q in _vl) + 0.15]
+x_ventanilla = min(abs(p.x) for p in _vl_frente)
+semi_tab = min(x_vidrio, x_ventanilla) - 0.035   # pegado a la puerta (con 0.07 asomaba el panel rojo de la puerta)
+print('PARABRISAS borde inferior y=%.3f z=%.3f, dy/dz=%.3f; vidrio |x|=%.3f, ventanilla |x|=%.3f -> semiancho del tablero %.3f'
+      % (yb_par, zb_par, k_par, x_vidrio, x_ventanilla, semi_tab))
+ALTO_TAB = 0.11
+def perfil_superior(py):
+    # curva suave de 0 a ALTO_TAB entre py=0.05 y 0.40, recortada para quedar 3.5 cm detras del vidrio
+    t = min(1.0, max(0.0, (py - 0.05) / 0.35))
+    return min(ALTO_TAB * math.sin(math.pi / 2 * t), max(0.0, (py - 0.035) / k_par))
+PERFIL_TABLERO = ([(0.03, -0.05), (0.03, -0.01)] + [(py, perfil_superior(py)) for py in (0.10, 0.16, 0.22, 0.28, 0.34, 0.40)]
+                  + [(0.445, 0.108), (0.475, 0.085), (0.48, 0.0), (0.485, -0.06), (0.51, -0.17), (0.45, -0.28), (0.03, -0.28)])
+print('PERFIL_TABLERO', [(round(a_, 3), round(b_, 3)) for a_, b_ in PERFIL_TABLERO])
 def extruir_perfil(nombre, perfil, x0, x1, mat, bisel=0.018):
     bm_t = bmesh.new()
-    cara0 = [bm_t.verts.new(V((x0, y_parabrisas + py, z0_tab + pz))) for py, pz in perfil]
-    cara1 = [bm_t.verts.new(V((x1, y_parabrisas + py, z0_tab + pz))) for py, pz in perfil]
+    cara0 = [bm_t.verts.new(V((x0, yb_par + py, zb_par + pz))) for py, pz in perfil]
+    cara1 = [bm_t.verts.new(V((x1, yb_par + py, zb_par + pz))) for py, pz in perfil]
     bm_t.faces.new(cara0[::-1]); bm_t.faces.new(cara1)
     n_ = len(perfil)
     for i in range(n_):
@@ -172,10 +198,11 @@ def extruir_perfil(nombre, perfil, x0, x1, mat, bisel=0.018):
         b_t = o_t.modifiers.new('bisel', 'BEVEL'); b_t.width = bisel; b_t.segments = 3; b_t.limit_method = 'ANGLE'
     o_t.data.materials.append(mat)
     return o_t
-tablero = extruir_perfil('car_dashboard', PERFIL_TABLERO, -(ancho - 0.25) / 2, (ancho - 0.25) / 2, plastico)
-# visera sobre los indicadores, solo del lado del conductor: un arco bajo que hace sombra sobre las esferas
-extruir_perfil('car_dashboard_visor', [(0.36, 0.022), (0.43, 0.068), (0.505, 0.055), (0.515, 0.020), (0.475, 0.005), (0.43, 0.030)],
-               x_cond - 0.22, x_cond + 0.22, plastico, 0.012)
+tablero = extruir_perfil('car_dashboard', PERFIL_TABLERO, -semi_tab, semi_tab, plastico)
+# visera sobre los indicadores, solo del lado del conductor: un arco bajo que hace sombra sobre las esferas (tambien
+# detras del vidrio: a 0.15 m de altura el vidrio esta a py = 0.25)
+extruir_perfil('car_dashboard_visor', [(0.40, 0.11), (0.445, 0.15), (0.50, 0.14), (0.51, 0.10), (0.475, 0.085), (0.445, 0.108)],
+               max(-semi_tab, x_cond - 0.22), min(semi_tab, x_cond + 0.22), plastico, 0.012)
 y_asiento = y_pilar_b - 0.08
 for nombre, x in (('car_seat_driver', x_cond), ('car_seat_passenger', -x_cond)):
     caja(nombre + '_base', V((x, y_asiento, z_piso + 0.22)), V((0.5, 0.5, 0.16)), tela)
@@ -267,9 +294,9 @@ gauges = material('car_gauges', (0.01, 0.012, 0.01), 0.5)
 tg = gauges.node_tree.nodes.new('ShaderNodeTexImage'); tg.image = img_g
 pg = gauges.node_tree.nodes['Principled BSDF']
 gauges.node_tree.links.new(tg.outputs['Color'], pg.inputs['Emission Color']); pg.inputs['Emission Strength'].default_value = 1.0
-# pegado a la cara del tablero nuevo (entre los puntos (0.475, 0.005) y (0.468, -0.105) del perfil), bajo la visera
-z_g = z0_tab - 0.05
-y_g = y_parabrisas + 0.475 - (0.007 * (0.005 - (z_g - z0_tab)) / 0.11) + 0.004
+# sobre la cara casi vertical del tablero v3 (puntos (0.48, 0.0) y (0.475, 0.085) del perfil), bajo la visera
+z_g = zb_par + 0.042
+y_g = yb_par + 0.48 + 0.004
 bm_g = bmesh.new(); uv_g = bm_g.loops.layers.uv.new()
 vs_g = [bm_g.verts.new(V((x_cond + dx, y_g, z_g + dz))) for dx, dz in ((0.15, -0.0375), (-0.15, -0.0375), (-0.15, 0.0375), (0.15, 0.0375))]
 f_g = bm_g.faces.new(vs_g)

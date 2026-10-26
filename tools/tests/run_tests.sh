@@ -6,7 +6,7 @@
 # Uso (Git Bash en Windows, o sh en Linux/macOS), desde cualquier carpeta:
 #   JAVA_HOME="/ruta/al/jdk-21" sh tools/tests/run_tests.sh [modo...]
 # Sin modos ejecuta toda la regresion. Modos sueltos: mundo:<puertas|bordes|sprint|aturdir|cortina|intro|escalon|mesas|
-# foco|pasos|pausa>, victoria:<completa|saltar>, derrota, arranque, carga, rendimiento.
+# foco|pasos|pausa|personajes>, victoria:<completa|saltar>, derrota, arranque, carga, rendimiento.
 # Diagnosticos sueltos (no forman parte de la regresion): DiagPisadas, DiagPisadasRender, DiagTexturas (ver su cabecera).
 AQUI=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$AQUI/../.." && pwd)
@@ -39,7 +39,7 @@ victoria() { for L in ESPANOL INGLES; do run victoria_$1_$L PruebaVictoria "$(w 
 derrota() { run derrota_ultima PruebaDerrota "$(w "$OUT/derrota_ultima")" ultima 0; run derrota_saltar PruebaDerrota "$(w "$OUT/derrota_saltar")" saltar 1; run derrota_normal PruebaDerrota "$(w "$OUT/derrota_normal")" normal 2; }
 
 MODOS="$*"
-[ -n "$MODOS" ] || MODOS="mundo:puertas mundo:bordes mundo:sprint mundo:aturdir mundo:cortina mundo:intro mundo:escalon mundo:mesas mundo:foco mundo:pasos mundo:pausa victoria:completa victoria:saltar derrota arranque carga"
+[ -n "$MODOS" ] || MODOS="mundo:puertas mundo:bordes mundo:sprint mundo:aturdir mundo:cortina mundo:intro mundo:escalon mundo:mesas mundo:foco mundo:pasos mundo:pausa mundo:personajes victoria:completa victoria:saltar derrota arranque carga"
 for m in $MODOS; do
     case "$m" in
         mundo:*) mundo "${m#mundo:}" ;;

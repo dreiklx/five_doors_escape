@@ -29,6 +29,10 @@ public class EntityDefinition {
 
     public boolean aiControlled = false;
 
+    /** Nodos del modelo que no se dibujan en esta entidad (CLAUDE.md §2.83), con sus hijos: accesorios emparentados
+     * al exportar que no deben verse (la guitarra de Bonnie). El modelo no se modifica; solo esta instancia. */
+    public String[] nodosOcultos = new String[0];
+
     public static class PerfilPasos {
         /** Variaciones (se elige una distinta de la anterior en cada pisada). */
         public String[] sonidos = new String[0];

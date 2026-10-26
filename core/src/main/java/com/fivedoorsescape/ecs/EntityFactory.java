@@ -50,6 +50,14 @@ public class EntityFactory {
 
         ModelComponent model = new ModelComponent();
         model.scene = new Scene(sceneAsset.scene);
+        for (String nombre : def.nodosOcultos) {
+            com.badlogic.gdx.graphics.g3d.model.Node nodo = model.scene.modelInstance.getNode(nombre, true);
+            if (nodo == null) {
+                com.badlogic.gdx.Gdx.app.error("EntityFactory", entityId + ": no existe el nodo oculto " + nombre);
+            } else {
+                ocultar(nodo);
+            }
+        }
         model.correctionRotationXDegrees = def.rotationXDegrees;
         model.scale = def.scale;
         entity.add(model);
@@ -67,6 +75,14 @@ public class EntityFactory {
 
         engine.addEntity(entity);
         return entity;
+    }
+
+    /** Quita las partes dibujables del nodo y de todos sus hijos (los nodos siguen en el esqueleto). */
+    private static void ocultar(com.badlogic.gdx.graphics.g3d.model.Node nodo) {
+        nodo.parts.clear();
+        for (com.badlogic.gdx.graphics.g3d.model.Node hijo : nodo.getChildren()) {
+            ocultar(hijo);
+        }
     }
 
     public Entity createPlayer(PerspectiveCamera camera, Vector3 position, float yawDegrees) {

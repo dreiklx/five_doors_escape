@@ -29,5 +29,22 @@
             "tonoMax": 1.06
         }
     },
+    "nodosOcultos": [
+        "Cube",
+        "Cube.001",
+        "Cube.002",
+        "Cube.003",
+        "Cube.004",
+        "Cube.005",
+        "Cube.006",
+        "Cube.007",
+        "Cube.008",
+        "Cube.009",
+        "Cylinder",
+        "Cylinder.001",
+        "Cylinder.002",
+        "Cylinder.003",
+        "Sphere"
+    ],
     "aiControlled": true
 }

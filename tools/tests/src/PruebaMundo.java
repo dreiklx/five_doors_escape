@@ -65,7 +65,7 @@ public class PruebaMundo extends Game {
 
   void guion(){ try { frames(3,null);
       if(modo.equals("foco")) { pruebaFoco(); } else if(modo.equals("intro")) { pruebaIntro(); } else { jugando(); apartarGuardias(); frames(2,null);
-        if(modo.equals("puertas")) pruebaPuertas(); if(modo.equals("sprint")) pruebaSprint(); if(modo.equals("aturdir")) pruebaAturdir(); if(modo.equals("cortina")) pruebaCortina(); if(modo.equals("bordes")) pruebaBordes(); if(modo.equals("vista")) pruebaVistaPuertas(); if(modo.equals("mesas")) pruebaMesas(); if(modo.equals("colliders")) volcarColliders(); if(modo.equals("escalon")) pruebaEscalonMesas(); if(modo.equals("pasos")) pruebaPasos(); if(modo.equals("pausa")) pruebaPausa(); }
+        if(modo.equals("puertas")) pruebaPuertas(); if(modo.equals("sprint")) pruebaSprint(); if(modo.equals("aturdir")) pruebaAturdir(); if(modo.equals("cortina")) pruebaCortina(); if(modo.equals("bordes")) pruebaBordes(); if(modo.equals("vista")) pruebaVistaPuertas(); if(modo.equals("mesas")) pruebaMesas(); if(modo.equals("colliders")) volcarColliders(); if(modo.equals("escalon")) pruebaEscalonMesas(); if(modo.equals("pasos")) pruebaPasos(); if(modo.equals("pausa")) pruebaPausa(); if(modo.equals("personajes")) pruebaPersonajes(); }
     } catch(Throwable e){ e.printStackTrace(); fallos++; }
     System.out.println("FALLOS: "+fallos); Gdx.app.postRunnable(()->Gdx.app.exit()); }
 
@@ -184,6 +184,22 @@ public class PruebaMundo extends Game {
     ok(campo("estado").toString().equals("JUGANDO") && !(Boolean)campo("pausado"), "la partida nueva se juega con normalidad (estado tras E: "+e2+")");
     pulsar(Input.Keys.ESCAPE); ok((Boolean)campo("pausado"), "y su menu de pausa funciona"); pulsar(Input.Keys.ESCAPE);
   }
+
+  // ---- personajes (§2.81-§2.83): cada animatronico caminando hacia el jugador, capturado desde su camara
+  void pruebaPersonajes() throws Exception {
+    final CollisionWorld cw=(CollisionWorld)campo("collisionWorld");
+    for(String id: new String[]{"freddy","bonnie","chica","foxy"}){
+      apartarGuardias(); final com.badlogic.ashley.core.Entity e=eGuardia(id); final AIComponent ai=guardia(id);
+      colocar(-8.7f,1f,90f); gl(()->{ try{ set("linternaEncendida",true); }catch(Exception x){} Mappers.transform.get(e).position.set(-4.6f,0f,1f); ai.rangoDeteccion=50f; ai.stateMachine.changeState(ChaseState.INSTANCE); });
+      for(int k=0;k<3;k++){ frames(k==0?12:8,null); final Vector3 g=new Vector3(Mappers.transform.get(e).position); mirarA(g.x,1.15f,g.z); frames(1,"personaje_"+id+"_"+k); }
+      final boolean[] anda={false}; gl(()->{ anda[0]="walk".equals(Mappers.animation.get(e).nombreLogicoActual); }); ok(anda[0], id+": camina (animacion walk) en las capturas");
+      gl(()->{ ai.stateMachine.changeState(IdleState.INSTANCE); ai.rangoDeteccion=0.01f; });
+    }
+    // la guitarra de Bonnie no se dibuja: ninguna parte de esos nodos
+    final int[] partes={0}; gl(()->{ com.badlogic.gdx.graphics.g3d.ModelInstance mi=Mappers.model.get(eGuardiaSinExc("bonnie")).scene.modelInstance; for(String n: new String[]{"Cube","Cube.001","Cube.009","Cylinder.002","Sphere"}){ com.badlogic.gdx.graphics.g3d.model.Node nd=mi.getNode(n,true); if(nd!=null) partes[0]+=nd.parts.size; for(com.badlogic.gdx.graphics.g3d.model.Node h: nd.getChildren()) partes[0]+=h.parts.size; } });
+    ok(partes[0]==0, "Bonnie: los nodos de la guitarra no tienen partes dibujables ("+partes[0]+")");
+  }
+  com.badlogic.ashley.core.Entity eGuardiaSinExc(String id){ try{ return eGuardia(id); }catch(Exception x){ throw new RuntimeException(x);} }
 
   // ---- puertas: se abren antes de llegar, se cruzan, se cierran al alejarse y se vuelven a cruzar
   void pruebaPuertas() throws Exception {
