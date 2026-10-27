@@ -67,12 +67,8 @@ public class MenuPausa {
         this.batch = batch;
         this.shapes = shapes;
         this.acciones = acciones;
-        // fuente propia con filtro lineal: escalada a 1.0-2.6x se ve suave (la del HUD usa vecino mas cercano)
-        this.font = new BitmapFont();
-        for (com.badlogic.gdx.graphics.g2d.TextureRegion region : font.getRegions()) {
-            region.getTexture().setFilter(com.badlogic.gdx.graphics.Texture.TextureFilter.Linear,
-                    com.badlogic.gdx.graphics.Texture.TextureFilter.Linear);
-        }
+        // fuente propia (Inter con mipmaps, CLAUDE.md §2.88); texto() traduce las escalas de antes con Fuentes.s
+        this.font = com.fivedoorsescape.util.Fuentes.ui();
         VolumenAudio.cargar();
     }
 
@@ -328,7 +324,7 @@ public class MenuPausa {
     }
 
     private void texto(String s, float x, float y, float escala, float r, float g, float b, int align, float ancho) {
-        font.getData().setScale(escala);
+        font.getData().setScale(com.fivedoorsescape.util.Fuentes.s(escala));
         font.setColor(r, g, b, 1f);
         batch.begin();
         layout.setText(font, s, font.getColor(), ancho, align, false);

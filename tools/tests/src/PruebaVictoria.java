@@ -204,6 +204,7 @@ public class PruebaVictoria extends Game {
       java.io.File senal=new java.io.File(System.getProperty("user.home"), ".fivedoorsatfreddys/escape_victoria.flag");
       ok(senal.isFile(), "se escribio la senal de victoria para FDAF ("+senal+")"); senal.delete();
       frames(2,"09_pantalla_victoria");
+      frames(260,"09b_pantalla_victoria_4s");   // ya terminado el fundido de entrada (CLAUDE.md §2.88)
     } catch(Throwable e){ e.printStackTrace(); fallos++; }
     System.out.println("FALLOS: "+fallos);
     Gdx.app.postRunnable(()->Gdx.app.exit());

@@ -49,12 +49,12 @@ public class NightGameOverScreen implements Screen {
         batch = new SpriteBatch();
         shapes = new ShapeRenderer();
 
-        fontTitulo = new BitmapFont();
-        fontTitulo.getData().setScale(6f);
+        fontTitulo = com.fivedoorsescape.util.Fuentes.titulo();   // CLAUDE.md §2.88
+        fontTitulo.getData().setScale(com.fivedoorsescape.util.Fuentes.t(6f));
         fontTitulo.setColor(Color.WHITE);
 
-        fontBoton = new BitmapFont();
-        fontBoton.getData().setScale(1.6f);
+        fontBoton = com.fivedoorsescape.util.Fuentes.ui();
+        fontBoton.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.6f));
         fontBoton.setColor(Color.WHITE);
     }
 

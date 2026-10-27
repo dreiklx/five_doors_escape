@@ -62,7 +62,7 @@ public class BootScreen implements Screen {
     public void show() {
         batch = new SpriteBatch();
         shapes = new ShapeRenderer();
-        font = new BitmapFont();
+        font = com.fivedoorsescape.util.Fuentes.ui();   // CLAUDE.md §2.88
         fondo = new Texture(Gdx.files.internal("ui/loading_background.jpg"));
         fondo.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         titulo = new Texture(Gdx.files.internal("ui/loading_title.png"), true);
@@ -203,18 +203,18 @@ public class BootScreen implements Screen {
 
         batch.begin();
         float escala = font.getScaleX();
-        font.getData().setScale(1.1f);
+        font.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.1f));
         String estado = fase == 0 ? Lang.get(handoff.idioma, "loading.text") + " " + (int) (progresoMostrado * 100) + "%"
                 : Lang.get(handoff.idioma, "loading.preparing");
         font.setColor(0.85f, 0.85f, 0.85f, 0.8f * aparicion);
         GlyphLayout le = new GlyphLayout(font, estado);
         font.draw(batch, le, (w - le.width) / 2f, by - 14f);
-        font.getData().setScale(1.0f);
+        font.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.0f));
         font.setColor(0.95f, 0.55f, 0.45f, 0.9f * aparicion);
         GlyphLayout etiqueta = new GlyphLayout(font, Lang.get(handoff.idioma, "tip.label"));
         font.draw(batch, etiqueta, (w - etiqueta.width) / 2f, h * 0.17f + 28f);
         font.setColor(0.9f, 0.9f, 0.9f, 0.85f * aparicion);
-        font.getData().setScale(1.15f);
+        font.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.15f));
         font.draw(batch, consejo, w * 0.2f, h * 0.17f, w * 0.6f, Align.center, true);
         font.getData().setScale(escala);
         font.setColor(Color.WHITE);

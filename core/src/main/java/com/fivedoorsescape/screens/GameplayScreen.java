@@ -331,6 +331,8 @@ public class GameplayScreen implements Screen {
     private PuertasInteriores puertasInteriores;
     /** Frustum culling de lo estatico (CLAUDE.md §2.60): grupo 0 mapa, 1 exterior, 2 auto (sin frustum). */
     private final CullingEstatico culling = new CullingEstatico();
+    /** Sombras de contacto bajo los animatronicos (CLAUDE.md §2.88); se crea en show() y se actualiza en el render de sceneManager. */
+    private com.fivedoorsescape.world.SombrasContacto sombrasContacto;
     private CortinaPirateCove cortinaPirateCove;
     private AturdimientoLinterna aturdimientoLinterna;
     private final Array<Entity> entidadesGuardias = new Array<>();
@@ -390,6 +392,8 @@ public class GameplayScreen implements Screen {
 
     private SpriteBatch uiBatch;
     private BitmapFont uiFont;
+    /** Rotulos grandes a pantalla completa (el RUN de la intro): la fuente de titulos, para no ampliar la de interfaz. */
+    private BitmapFont tituloFont;
     private ShapeRenderer uiShapes;
 
     private MapDefinition mapDef;
@@ -807,13 +811,22 @@ public class GameplayScreen implements Screen {
             public void render() {
                 // un solo punto para todos los estados (juego, cinematicas, jumpscare): culling antes de dibujar
                 culling.actualizar(camera);
+                if (sombrasContacto != null) {
+                    sombrasContacto.actualizar();
+                }
                 super.render();
             }
 
             @Override
             public void renderShadows() {
                 culling.antesDeSombras();
+                if (sombrasContacto != null) {
+                    sombrasContacto.alAntesDeSombras();
+                }
                 super.renderShadows();
+                if (sombrasContacto != null) {
+                    sombrasContacto.alDespuesDeSombras();
+                }
                 culling.despuesDeSombras();
             }
         };
@@ -950,10 +963,12 @@ public class GameplayScreen implements Screen {
         sceneManager.setSkyBox(skybox);
 
         crearDecalesSangre();
+        sombrasContacto = new com.fivedoorsescape.world.SombrasContacto(sceneManager, engine);
 
         uiBatch = new SpriteBatch();
-        uiFont = new BitmapFont();
-        uiFont.getData().setScale(1.3f);
+        uiFont = com.fivedoorsescape.util.Fuentes.ui();   // Inter (CLAUDE.md §2.88); s(1.3) mide lo que la escala 1.3 de antes
+        uiFont.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.3f));
+        tituloFont = com.fivedoorsescape.util.Fuentes.titulo();
         uiFont.setColor(Color.WHITE);
         uiShapes = new ShapeRenderer();
         menuPausa = new MenuPausa(handoff.idioma, uiBatch, uiShapes, new MenuPausa.Acciones() {
@@ -2015,6 +2030,10 @@ public class GameplayScreen implements Screen {
      * superponerse ni tapar el centro de la pantalla. */
     private static final float ESCALA_TEXTO_INTERACCION = 0.85f;
     private static final float TEXTO_INTERACCION_OFFSET_Y = 34f;
+    /** Desde §2.88 el texto de interaccion se dimensiona por el alto de la ventana: su linea mide este
+     * porcentaje (unos 25 px en 1080p; con la escala fija de antes medían 15 px y casi no se leian). La
+     * escala y el offset de arriba quedan como minimo para ventanas pequenas. */
+    private static final float ALTO_TEXTO_INTERACCION = 0.023f;
 
     /** Texto "Presiona E para interactuar"/"Press E to interact" (pedido explicito del usuario
      * 2026-08-15) -- aparece unicamente cuando objetivoInteractivoActual no es null, es decir,
@@ -2030,10 +2049,16 @@ public class GameplayScreen implements Screen {
         }
         String texto = Lang.get(handoff.idioma, objetivoInteractivoActual.claveTexto);
         float escalaOriginal = uiFont.getScaleX();
-        uiFont.getData().setScale(ESCALA_TEXTO_INTERACCION);
-        GlyphLayout layout = new GlyphLayout(uiFont, texto);
+        uiFont.getData().setScale(Math.max(com.fivedoorsescape.util.Fuentes.s(ESCALA_TEXTO_INTERACCION),
+                com.fivedoorsescape.util.Fuentes.porAltoUi(ALTO_TEXTO_INTERACCION)));
+        GlyphLayout layout = new GlyphLayout(uiFont, texto, new Color(0.94f, 0.92f, 0.88f, 1f), 0f,
+                com.badlogic.gdx.utils.Align.left, false);
+        // la sombra necesita su propio layout: draw(batch, layout, ...) usa el color guardado en el layout, no setColor
+        // (antes la "sombra" salia blanca, igual que el texto)
+        GlyphLayout layoutSombra = new GlyphLayout(uiFont, texto, new Color(0f, 0f, 0f, 0.85f), 0f,
+                com.badlogic.gdx.utils.Align.left, false);
         float x = Gdx.graphics.getWidth() / 2f - layout.width / 2f;
-        float y = Gdx.graphics.getHeight() / 2f - TEXTO_INTERACCION_OFFSET_Y;
+        float y = Gdx.graphics.getHeight() / 2f - Math.max(TEXTO_INTERACCION_OFFSET_Y, Gdx.graphics.getHeight() * 0.035f);
 
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -2041,9 +2066,8 @@ public class GameplayScreen implements Screen {
         // Sombra sutil de contraste (mismo criterio ya usado para el crosshair contra fondos
         // claros) en vez de una caja de fondo -- mantiene el texto discreto, sin ocupar espacio
         // extra en pantalla.
-        uiFont.setColor(0f, 0f, 0f, 0.85f);
-        uiFont.draw(uiBatch, layout, x + 1f, y - 1f);
-        uiFont.setColor(Color.WHITE);
+        float sombra = Math.max(1f, Gdx.graphics.getHeight() / 720f);
+        uiFont.draw(uiBatch, layoutSombra, x + sombra, y - sombra);
         uiFont.draw(uiBatch, layout, x, y);
         uiBatch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
@@ -2635,11 +2659,11 @@ public class GameplayScreen implements Screen {
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
         uiBatch.begin();
         float escala = uiFont.getScaleX();
-        uiFont.getData().setScale(2.1f);
+        uiFont.getData().setScale(com.fivedoorsescape.util.Fuentes.s(2.1f));
         uiFont.setColor(1f, 1f, 1f, aparicion);
         GlyphLayout titulo = new GlyphLayout(uiFont, Lang.get(handoff.idioma, "instr.title"));
         uiFont.draw(uiBatch, titulo, px + (panelW - titulo.width) / 2f, py + panelH - 32f);
-        uiFont.getData().setScale(1.25f);
+        uiFont.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.25f));
         for (int i = 0; i < FILAS_INSTRUCCIONES.length; i++) {
             float y = filaY0 - i * 38f;
             uiFont.setColor(0.82f, 0.82f, 0.82f, aparicion);
@@ -2648,7 +2672,7 @@ public class GameplayScreen implements Screen {
             GlyphLayout tecla = new GlyphLayout(uiFont, Lang.get(handoff.idioma, FILAS_INSTRUCCIONES[i][1]));
             uiFont.draw(uiBatch, tecla, px + panelW - 64f - tecla.width, y);
         }
-        uiFont.getData().setScale(1.15f);
+        uiFont.getData().setScale(com.fivedoorsescape.util.Fuentes.s(1.15f));
         uiFont.setColor(0.9f, 0.9f, 0.9f, aparicion);
         float objetivoY = filaY0 - FILAS_INSTRUCCIONES.length * 38f - 18f;
         uiFont.draw(uiBatch, Lang.get(handoff.idioma, "instr.objective"), px + 64f, objetivoY, panelW - 128f, com.badlogic.gdx.utils.Align.center, true);
@@ -2962,14 +2986,12 @@ public class GameplayScreen implements Screen {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
 
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        float escalaOriginal = uiFont.getScaleX();
-        uiFont.getData().setScale(ESCALA_TEXTO_INTRO);
-        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(uiFont, texto);
+        tituloFont.getData().setScale(com.fivedoorsescape.util.Fuentes.t(ESCALA_TEXTO_INTRO));
+        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(tituloFont, texto);
         uiBatch.begin();
-        uiFont.draw(uiBatch, layout, Gdx.graphics.getWidth() / 2f - layout.width / 2f,
+        tituloFont.draw(uiBatch, layout, Gdx.graphics.getWidth() / 2f - layout.width / 2f,
                 Gdx.graphics.getHeight() / 2f + layout.height / 2f);
         uiBatch.end();
-        uiFont.getData().setScale(escalaOriginal);
     }
 
     /** Uno de los cuadros reales del GIF de estatica (Static.gif) tiene un borde blanco delgado
@@ -3135,7 +3157,7 @@ public class GameplayScreen implements Screen {
         uiBatch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
         uiBatch.begin();
         float escala = uiFont.getData().scaleX;
-        uiFont.getData().setScale(Math.max(1.6f, h / 450f));
+        uiFont.getData().setScale(com.fivedoorsescape.util.Fuentes.s(Math.max(1.6f, h / 450f)));
         uiFont.setColor(1f, 1f, 1f, 0.6f + 0.4f * Math.abs(MathUtils.sin(tiempoActivacion * 2.2f)));
         com.badlogic.gdx.graphics.g2d.GlyphLayout gl = new com.badlogic.gdx.graphics.g2d.GlyphLayout(uiFont,
                 Lang.get(handoff.idioma, "window.click"));
@@ -3163,6 +3185,9 @@ public class GameplayScreen implements Screen {
     @Override
     public void dispose() {
         pasos.dispose();
+        if (sombrasContacto != null) {
+            sombrasContacto.dispose();
+        }
         if (menuPausa != null) {
             menuPausa.dispose();
         }
@@ -3174,6 +3199,7 @@ public class GameplayScreen implements Screen {
         skybox.dispose();
         uiBatch.dispose();
         uiFont.dispose();
+        tituloFont.dispose();
         uiShapes.dispose();
         for (Texture cuadro : cuadrosEstatica) {
             cuadro.dispose();

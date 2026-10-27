@@ -77,9 +77,10 @@ public class OmitirCinematica {
         batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
         batch.begin();
         float escala = fuente.getScaleX();
-        fuente.getData().setScale(0.9f);
+        // por el alto de la ventana, como el anillo (CLAUDE.md §2.88): con la escala fija medía 14 px en 1080p
+        fuente.getData().setScale(Math.max(com.fivedoorsescape.util.Fuentes.s(0.9f), com.fivedoorsescape.util.Fuentes.porAltoUi(0.021f)));
+        fuente.setColor(1f, 1f, 1f, 0.45f + 0.5f * f);   // antes del layout: el layout guarda el color al crearse
         GlyphLayout layout = new GlyphLayout(fuente, texto);
-        fuente.setColor(1f, 1f, 1f, 0.45f + 0.5f * f);
         float tx = cx - r - 12f - layout.width;
         fuente.draw(batch, layout, tx, cy + layout.height / 2f);
         fuente.setColor(Color.WHITE);

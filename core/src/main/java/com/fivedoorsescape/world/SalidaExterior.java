@@ -54,6 +54,15 @@ public class SalidaExterior implements Disposable {
     public static final String SONIDO_PUERTA_SALIDA = "audio/sfx/exit_door_unlock.wav";
     public static final String SONIDO_PUERTA_EMERGENCIA = "audio/sfx/emergency_door_open.wav";
 
+    /** Punto del atlas de main_material dentro de una isla lisa del gris de las paredes (tono 25, radio de 30 px en el
+     * atlas de 2048: aguanta los mipmaps). main_material no es una textura repetible sino un atlas de islas grises
+     * sobre negro: el deposito (que el modelo original no mostraba) y el panel propio de la pared oeste muestreaban
+     * bordes de islas y fondo negro, y se veian "manchas" geometricas negras (CLAUDE.md §2.87 VE5, §2.88). Esas caras
+     * usan ahora este unico punto: pared lisa del mismo tono que el resto del edificio. */
+    private static final float UV_PARED_LISA_U = 0.64746f, UV_PARED_LISA_V = 0.50684f;
+    /** Limite este del deposito: la cara de la pared de la puerta de salida que da al deposito (bisagra en x=-8.87). */
+    private static final float DEPOSITO_MAX_X = -8.80f;
+
     private static final float ANGULO_PUERTA_SALIDA = 92f;
     private static final float DURACION_PUERTA_SALIDA = 1.6f;
     private static final float ANGULO_PUERTA_EMERGENCIA = 98f;
@@ -116,6 +125,7 @@ public class SalidaExterior implements Disposable {
 
     private int triangulosParedRetirados;
     private int triangulosEstanteRetirados;
+    private int triangulosDepositoLisos;
 
     public SalidaExterior(ExteriorDefinition def, AssetService assets) {
         this.def = def;
@@ -140,7 +150,7 @@ public class SalidaExterior implements Disposable {
             retirarTriangulos(raiz, instancia);
         }
         Gdx.app.log("SalidaExterior", "Triangulos retirados: pared oeste del deposito " + triangulosParedRetirados
-                + ", estante " + triangulosEstanteRetirados);
+                + ", estante " + triangulosEstanteRetirados + "; caras del deposito con pared lisa " + triangulosDepositoLisos);
         nodoPuertaSalida = mapScene.modelInstance.getNode(def.exitDoorNode, true);
         if (nodoPuertaSalida != null) {
             puertaSalidaGlobalCerrada.set(instancia).mul(nodoPuertaSalida.globalTransform);
@@ -166,8 +176,10 @@ public class SalidaExterior implements Disposable {
             }
             Mesh mesh = parte.meshPart.mesh;
             VertexAttribute pos = mesh.getVertexAttribute(VertexAttributes.Usage.Position);
+            VertexAttribute uv = mesh.getVertexAttribute(VertexAttributes.Usage.TextureCoordinates);
             int paso = mesh.getVertexSize() / 4;
             int desp = pos.offset / 4;
+            boolean cambioUv = false;
             float[] vertices = new float[mesh.getNumVertices() * paso];
             mesh.getVertices(vertices);
             short[] indices = new short[mesh.getNumIndices()];
@@ -189,10 +201,21 @@ public class SalidaExterior implements Disposable {
                     } else {
                         triangulosEstanteRetirados++;
                     }
+                } else if (esPared && uv != null && enDeposito(a) && enDeposito(b) && enDeposito(c)) {
+                    for (int k = 0; k < 3; k++) {
+                        int base = (indices[i + k] & 0xFFFF) * paso + uv.offset / 4;
+                        vertices[base] = UV_PARED_LISA_U;
+                        vertices[base + 1] = UV_PARED_LISA_V;
+                    }
+                    triangulosDepositoLisos++;
+                    cambioUv = true;
                 }
             }
             if (cambio) {
                 mesh.setIndices(indices);
+            }
+            if (cambioUv) {
+                mesh.setVertices(vertices);
             }
         }
         for (Node hijo : nodo.getChildren()) {
@@ -208,6 +231,11 @@ public class SalidaExterior implements Disposable {
         boolean interior = Math.abs(a.x - def.wallInnerX) < 0.02f && Math.abs(b.x - def.wallInnerX) < 0.02f
                 && Math.abs(c.x - def.wallInnerX) < 0.02f;
         return (exterior || interior) && enTramo(a) && enTramo(b) && enTramo(c);
+    }
+
+    private boolean enDeposito(Vector3 p) {
+        return p.x >= def.wallInnerX - 0.05f && p.x <= DEPOSITO_MAX_X && p.z >= def.wallPanelMinZ - 0.05f
+                && p.z <= def.wallPanelMaxZ + 0.05f && p.y >= -0.01f && p.y <= def.wallPanelTop + 0.01f;
     }
 
     private boolean enTramo(Vector3 p) {
@@ -428,7 +456,7 @@ public class SalidaExterior implements Disposable {
         rectPared(p, x, h, z0, alto, z1);
         // jambas y dintel del hueco a traves de los 0.71 m de pared, hasta la fachada exterior (sin rendija visible)
         float xe = def.wallX - 0.13f;
-        p.setUVRange(0f, 0f, 0.1f, h);
+        p.setUVRange(UV_PARED_LISA_U, UV_PARED_LISA_V, UV_PARED_LISA_U, UV_PARED_LISA_V);
         p.rect(xe, 0f, z0, x, 0f, z0, x, h, z0, xe, h, z0, 0f, 0f, 1f);
         p.rect(x, 0f, z1, xe, 0f, z1, xe, h, z1, x, h, z1, 0f, 0f, -1f);
         p.rect(xe, h, z0, x, h, z0, x, h, z1, xe, h, z1, 0f, -1f, 0f);
@@ -437,7 +465,7 @@ public class SalidaExterior implements Disposable {
     }
 
     private static void rectPared(MeshPartBuilder p, float x, float y0, float z0, float y1, float z1) {
-        p.setUVRange(z0 / 2f, y0 / 2f, z1 / 2f, y1 / 2f);
+        p.setUVRange(UV_PARED_LISA_U, UV_PARED_LISA_V, UV_PARED_LISA_U, UV_PARED_LISA_V);   // ver UV_PARED_LISA_U
         p.rect(x, y0, z0, x, y0, z1, x, y1, z1, x, y1, z0, 1f, 0f, 0f);
     }
 
