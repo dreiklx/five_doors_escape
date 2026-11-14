@@ -2,8 +2,8 @@
 REM FiveDoorsEscape.exe para la distribucion completa (CLAUDE.md §2.88): un lanzador nativo de launch4j
 REM en modo "launching" (no envuelve los jar), igual que FiveDoorsAtFreddys.exe (§1.23). Usa el runtime
 REM JDK 21 que build-distribucion.bat copia en FiveDoorsEscape\runtime y los jar de installDist en
-REM FiveDoorsEscape\lwjgl3\lib. Sirve para abrir Escape directamente; desde FDAF se sigue lanzando con
-REM lwjgl3.bat (LanzadorEscape), que no cambia.
+REM FiveDoorsEscape\lwjgl3\lib. Sirve para abrir Escape directamente. Desde FDAF v2.18
+REM (CLAUDE.md §1.81) LanzadorEscape usa el mismo runtime con "javaw -cp lib\* Lwjgl3Launcher", no lwjgl3.bat.
 REM Uso: build-exe-escape.bat <carpeta FiveDoorsEscape de la distribucion> [JDK 8 o superior para correr launch4j]
 REM launch4j 3.50 y sus dependencias se reutilizan de la cache de build-exe-launcher.bat
 REM (%USERPROFILE%\.launch4j-cache\3.50); si no existe, correr antes build-portable.bat.
